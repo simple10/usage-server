@@ -283,7 +283,11 @@ session_prs(harness, session_id, repo TEXT, number INT, url TEXT, action TEXT, t
 schema_version(version INT)
 ```
 
+The implemented schema (`server/usage_server/db.py`) adds a few columns to `requests`: `trace_id`, `source`, `source_hash`, `source_hint` and `effective_service_tier`. It also adds `kv(key, value)` for small server state such as the bad-line count, the last price sync and the raw-data cutoff.
+
 Rules for the schema:
+- **`requests.input` is uncached input.** Anthropic reports input without cached tokens. OpenAI-style usage reports prompt tokens *including* cached tokens; the reader detects this from `total` (`total ≈ input + output`), or without a total from the provider, and subtracts `cache_read`. The spool field `cached` is ignored: for Claude the host fills it with the cache *write* count when there are no reads.
+- A daily rollup row is updated in the same transaction as each newly inserted request. After raw rows are pruned, queries for older days read the rollup (no tier pricing there).
 - Store tokens, never dollars. Compute cost when a request is served (§5.6), so a price update also corrects past costs.
 - Migrations run in order at startup, inside a transaction, and are tracked in `schema_version`.
 
@@ -317,6 +321,8 @@ Every resource is named with a query parameter, never a path segment. That keeps
   - If the 5-minute and 1-hour split is unknown, price every cache write at the 5-minute rate.
 - **Tiers.** Apply models.dev `tiers` (context-size price tiers) when one request's input is above the tier size.
 - **Missing prices.** A model with no price shows a cost of "—" and is listed under `/api/prices` as unknown.
+- **Missing cache prices.** A missing `cache_read` price falls back to the input price; a missing `cache_write` price falls back to 1.25 × input.
+- **Tiers** come from `cost.tiers[]` (`tier.size`), or from `cost.context_over_200k` when there is no `tiers` list. The prompt size of a request is `input + cache_read + cache_write`. A tier without its own cache prices scales the base cache prices by the tier's input ratio.
 - **Labelling.** Every cost in the UI is labelled as an estimate. Subscription traffic is shown at API list prices.
 
 ### 5.7 Auth
@@ -325,7 +331,7 @@ Requests arrive in one of 3 ways:
 
 1. **Through the bridge.** The request carries `X-Usage-Bridge-Token`, which must equal `USAGE_BRIDGE_TOKEN` (compared in constant time). The proxy has already checked the management key.
 2. **Standalone with a token.** The request carries `Authorization: Bearer <token>`, and the token is one of `USAGE_API_TOKENS`.
-3. **Standalone with the management key** (optional). The server checks the key once by calling a cheap management endpoint on `USAGE_CPA_URL`, then caches the answer for 5 minutes. This only works when the proxy accepts management calls from the server's address, which may need `management.allow-remote: true`.
+3. **Standalone with the management key** (optional). The server checks the key once by calling `GET /v0/management/debug` on `USAGE_CPA_URL`, then caches the answer for 5 minutes. Failures to reach the proxy are not cached. This only works when the proxy accepts management calls from the server's address, which may need `management.allow-remote: true`.
 
 `/ui/` and its assets need no auth and contain no data. All `/api/*` endpoints need one of the 3 methods.
 
