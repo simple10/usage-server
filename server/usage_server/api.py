@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import threading
 import time
 import urllib.error
@@ -122,7 +123,7 @@ class App:
 
     # -- endpoints --
     def health(self, request: Request, body: bytes = b"") -> Response:
-        out: dict[str, Any] = {"ok": True, "uptime_s": round(time.time() - self.started), "server_time": time.time()}
+        out: dict[str, Any] = {"ok": True, "version": os.environ.get("USAGE_SERVER_VERSION", "dev"), "uptime_s": round(time.time() - self.started), "server_time": time.time()}
         if self.spool:
             st = self.spool.plugin_status()
             out["plugin"] = st

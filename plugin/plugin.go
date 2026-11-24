@@ -16,8 +16,7 @@ import (
 // pluginName is shown in the proxy's plugin list. The plugin ID the host uses
 // comes from the library's file name (usage-server.so → "usage-server").
 const (
-	pluginName    = "usage-server"
-	pluginVersion = "0.1.0"
+	pluginName = "usage-server"
 	// schemaVersion 6 is the first host schema that returns plugin management
 	// JSON bodies without HTML-escaping. We need nothing newer.
 	schemaVersion = 6
@@ -27,6 +26,10 @@ const (
 // metadata has an empty Name, Version, Author or GitHubRepository. Override it
 // at build time with -ldflags "-X main.repoURL=https://github.com/<owner>/<repo>".
 var repoURL = "https://example.invalid/usage-server"
+
+// pluginVersion is stamped from the VERSION file at build time by
+// scripts/build-plugin.sh (-ldflags "-X main.pluginVersion=<version>").
+var pluginVersion = "0.0.0-dev"
 
 // Config is the YAML block under plugins.configs.<id> in the proxy config.
 type Config struct {
