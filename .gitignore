@@ -1,0 +1,27 @@
+# Local reference copies of third-party scripts (not published)
+/reference/
+
+# Build output
+/dist/
+/plugin/build/
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local data and secrets
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+/data/
+/spool/
+/deploy/local/
