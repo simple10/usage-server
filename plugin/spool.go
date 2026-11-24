@@ -30,6 +30,21 @@ type spoolWriter struct {
 	done  chan struct{}
 	once  sync.Once
 	stats spoolStats
+	tune  spoolTuning
+}
+
+// spoolTuning holds timings that tests shorten. Production uses defaults.
+type spoolTuning struct {
+	flushEvery     time.Duration
+	maintainEvery  time.Duration
+	statusEvery    time.Duration
+	maxFileAge     time.Duration
+	errorBackoff   time.Duration
+	restartBackoff time.Duration
+	closeWait      time.Duration
+	// beforeWrite, when set, runs in the writer goroutine before each record.
+	// Tests use it to inject panics and stalls.
+	beforeWrite func(line []byte)
 }
 
 type spoolStats struct {
@@ -41,15 +56,30 @@ type spoolStats struct {
 }
 
 const (
-	spoolPrefix      = "usage-"
-	spoolSuffix      = ".jsonl"
-	statusFile       = "_plugin_status.json"
-	maintainInterval = 30 * time.Second
-	statusInterval   = 10 * time.Second
-	maxFileAge       = 24 * time.Hour
+	spoolPrefix   = "usage-"
+	spoolSuffix   = ".jsonl"
+	statusFile    = "_plugin_status.json"
+	flushBatch    = 256
+	writeBufBytes = 64 * 1024
 )
 
+func defaultTuning(cfg Config) spoolTuning {
+	return spoolTuning{
+		flushEvery:     time.Duration(cfg.FlushIntervalMS) * time.Millisecond,
+		maintainEvery:  30 * time.Second,
+		statusEvery:    10 * time.Second,
+		maxFileAge:     24 * time.Hour,
+		errorBackoff:   5 * time.Second,
+		restartBackoff: time.Second,
+		closeWait:      3 * time.Second,
+	}
+}
+
 func newSpoolWriter(cfg Config) (*spoolWriter, error) {
+	return newSpoolWriterTuned(cfg, defaultTuning(cfg))
+}
+
+func newSpoolWriterTuned(cfg Config, tune spoolTuning) (*spoolWriter, error) {
 	if err := os.MkdirAll(cfg.SpoolDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create spool dir %s: %w", cfg.SpoolDir, err)
 	}
@@ -59,6 +89,7 @@ func newSpoolWriter(cfg Config) (*spoolWriter, error) {
 		flush: make(chan chan struct{}),
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
+		tune:  tune,
 	}
 	go w.supervise()
 	return w, nil
@@ -74,6 +105,7 @@ func (w *spoolWriter) cfgChanged(cfg Config) bool {
 func (w *spoolWriter) enqueue(line []byte) {
 	select {
 	case <-w.stop:
+		w.stats.dropped.Add(1)
 		return
 	default:
 	}
@@ -100,26 +132,30 @@ func (w *spoolWriter) flushNow() {
 	}
 }
 
-// close stops the writer, drains what is queued, and waits at most 3 seconds.
+// close stops the writer, drains what is queued, and waits at most closeWait.
 func (w *spoolWriter) close() {
 	w.once.Do(func() { close(w.stop) })
 	select {
 	case <-w.done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(w.tune.closeWait):
 	}
 }
 
 // supervise restarts the run loop after a panic, with a short pause.
 func (w *spoolWriter) supervise() {
 	defer close(w.done)
+	defer func() { _ = recover() }() // last line of defence; run() recovers itself
 	for {
 		if w.runSafely() {
 			return
 		}
 		select {
 		case <-w.stop:
+			// Drain what we can after a panic during shutdown, without hooks.
+			w.tune.beforeWrite = nil
+			w.runSafely()
 			return
-		case <-time.After(time.Second):
+		case <-time.After(w.tune.restartBackoff):
 		}
 	}
 }
@@ -145,45 +181,49 @@ type openFile struct {
 	pending int
 }
 
+// writerState is owned by the run goroutine.
+type writerState struct {
+	cur        *openFile
+	retryAfter time.Time // after a disk error, drop records until then
+}
+
 func (w *spoolWriter) run() {
-	flushEvery := time.Duration(w.cfg.FlushIntervalMS) * time.Millisecond
-	flushTick := time.NewTicker(flushEvery)
+	flushTick := time.NewTicker(w.tune.flushEvery)
 	defer flushTick.Stop()
-	maintainTick := time.NewTicker(maintainInterval)
+	maintainTick := time.NewTicker(w.tune.maintainEvery)
 	defer maintainTick.Stop()
-	statusTick := time.NewTicker(statusInterval)
+	statusTick := time.NewTicker(w.tune.statusEvery)
 	defer statusTick.Stop()
 
-	var cur *openFile
-	defer func() { w.closeFile(cur) }()
+	st := &writerState{}
+	defer func() { w.closeFile(st) }()
 
 	w.maintain("")
 	w.writeStatus("")
 	for {
 		select {
 		case line := <-w.queue:
-			cur = w.write(cur, line)
+			w.write(st, line)
 		case ack := <-w.flush:
-			w.flushFile(cur)
+			w.flushFile(st)
 			close(ack)
 		case <-flushTick.C:
-			w.flushFile(cur)
+			w.flushFile(st)
 		case <-maintainTick.C:
-			if cur != nil && time.Since(cur.opened) > maxFileAge {
-				w.closeFile(cur)
-				cur = nil
+			if st.cur != nil && time.Since(st.cur.opened) > w.tune.maxFileAge {
+				w.closeFile(st)
 			}
-			w.maintain(currentPath(cur))
+			w.maintain(currentPath(st.cur))
 		case <-statusTick.C:
-			w.writeStatus(currentPath(cur))
+			w.writeStatus(currentPath(st.cur))
 		case <-w.stop:
 			for {
 				select {
 				case line := <-w.queue:
-					cur = w.write(cur, line)
+					w.write(st, line)
 				default:
-					w.flushFile(cur)
-					w.writeStatus(currentPath(cur))
+					w.closeFile(st)
+					w.writeStatus("")
 					return
 				}
 			}
@@ -198,44 +238,66 @@ func currentPath(cur *openFile) string {
 	return cur.path
 }
 
-func (w *spoolWriter) write(cur *openFile, line []byte) *openFile {
-	maxBytes := int64(w.cfg.MaxFileMB) * 1024 * 1024
-	if cur != nil && cur.size+int64(len(line))+1 > maxBytes {
-		w.closeFile(cur)
-		cur = nil
+func (w *spoolWriter) write(st *writerState, line []byte) {
+	if hook := w.tune.beforeWrite; hook != nil {
+		hook(line)
 	}
-	if cur == nil {
-		var err error
-		cur, err = w.openNew()
+	if st.cur == nil && time.Now().Before(st.retryAfter) {
+		w.stats.dropped.Add(1)
+		return
+	}
+	maxBytes := int64(w.cfg.MaxFileMB) * 1024 * 1024
+	if st.cur != nil && st.cur.size > 0 && st.cur.size+int64(len(line))+1 > maxBytes {
+		w.closeFile(st)
+	}
+	if st.cur == nil {
+		cur, err := w.openNew()
 		if err != nil {
 			w.stats.writeErrors.Add(1)
 			w.stats.dropped.Add(1)
-			return nil
+			st.retryAfter = time.Now().Add(w.tune.errorBackoff)
+			return
 		}
+		st.cur = cur
 	}
+	cur := st.cur
 	if _, err := cur.buf.Write(line); err != nil {
-		return w.failFile(cur)
+		w.failFile(st, err, 1)
+		return
 	}
 	if err := cur.buf.WriteByte('\n'); err != nil {
-		return w.failFile(cur)
+		w.failFile(st, err, 1)
+		return
 	}
 	cur.size += int64(len(line)) + 1
 	cur.pending++
-	w.stats.written.Add(1)
-	if cur.pending >= 256 {
-		w.flushFile(cur)
+	if cur.pending >= flushBatch {
+		w.flushFile(st)
 	}
-	return cur
 }
 
-// failFile drops the broken file handle; the next record opens a new file.
-func (w *spoolWriter) failFile(cur *openFile) *openFile {
+// failFile drops the broken file handle and counts the records that were
+// buffered but not yet on disk. New records are dropped for errorBackoff,
+// then the next record opens a new file.
+func (w *spoolWriter) failFile(st *writerState, err error, extra int) {
+	cur := st.cur
+	st.cur = nil
+	st.retryAfter = time.Now().Add(w.tune.errorBackoff)
 	w.stats.writeErrors.Add(1)
-	w.stats.dropped.Add(1)
-	if cur != nil && cur.f != nil {
-		_ = cur.f.Close()
+	lost := int64(extra)
+	if cur != nil {
+		lost += int64(cur.pending)
+		logger.Printf("spool write failed on %s: %v", filepath.Base(cur.path), err)
+		if cur.f != nil {
+			_ = cur.f.Close()
+		}
+		// A file that never got any data (typical on a full disk) is removed,
+		// so repeated failures do not leave empty files behind.
+		if info, statErr := os.Stat(cur.path); statErr == nil && info.Size() == 0 {
+			_ = os.Remove(cur.path)
+		}
 	}
-	return nil
+	w.stats.dropped.Add(lost)
 }
 
 func (w *spoolWriter) openNew() (*openFile, error) {
@@ -249,27 +311,34 @@ func (w *spoolWriter) openNew() (*openFile, error) {
 		logger.Printf("open spool file: %v", err)
 		return nil, err
 	}
-	return &openFile{path: path, f: f, buf: bufio.NewWriterSize(f, 64*1024), opened: now}, nil
+	return &openFile{path: path, f: f, buf: bufio.NewWriterSize(f, writeBufBytes), opened: now}, nil
 }
 
-func (w *spoolWriter) flushFile(cur *openFile) {
+// flushFile writes buffered records to the file. Records count as written
+// only once they reach the file.
+func (w *spoolWriter) flushFile(st *writerState) {
+	cur := st.cur
 	if cur == nil || cur.pending == 0 {
 		return
 	}
 	if err := cur.buf.Flush(); err != nil {
-		w.stats.writeErrors.Add(1)
-		logger.Printf("flush spool file: %v", err)
+		w.failFile(st, err, 0)
+		return
 	}
+	w.stats.written.Add(int64(cur.pending))
 	cur.pending = 0
 }
 
-func (w *spoolWriter) closeFile(cur *openFile) {
-	if cur == nil {
+func (w *spoolWriter) closeFile(st *writerState) {
+	if st.cur == nil {
 		return
 	}
-	w.flushFile(cur)
-	if cur.f != nil {
-		_ = cur.f.Close()
+	w.flushFile(st)
+	if st.cur != nil {
+		if st.cur.f != nil {
+			_ = st.cur.f.Close()
+		}
+		st.cur = nil
 	}
 }
 
@@ -344,31 +413,35 @@ type pluginStatus struct {
 	Panics       int64  `json:"panics"`
 }
 
-// writeStatus publishes counters for the server's health view. It writes a
-// temp file and renames it, so readers never see a partial file.
-func (w *spoolWriter) writeStatus(current string) {
+func (w *spoolWriter) snapshot(current string) pluginStatus {
 	st := pluginStatus{
 		Version:      pluginVersion,
 		PID:          os.Getpid(),
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
-		CurrentFile:  filepath.Base(current),
 		QueueLen:     len(w.queue),
 		QueueCap:     cap(w.queue),
 		Written:      w.stats.written.Load(),
 		Dropped:      w.stats.dropped.Load(),
 		WriteErrors:  w.stats.writeErrors.Load(),
 		DecodeErrors: w.stats.decodeErrors.Load(),
-		Panics:       w.stats.panics.Load(),
+		Panics:       w.stats.panics.Load() + global.exportPanics.Load(),
 	}
-	if current == "" {
-		st.CurrentFile = ""
+	if current != "" {
+		st.CurrentFile = filepath.Base(current)
 	}
-	raw, err := json.Marshal(st)
+	return st
+}
+
+// writeStatus publishes counters for the server's health view. It writes a
+// temp file and renames it, so readers never see a partial file.
+func (w *spoolWriter) writeStatus(current string) {
+	raw, err := json.Marshal(w.snapshot(current))
 	if err != nil {
 		return
 	}
 	tmp := filepath.Join(w.cfg.SpoolDir, statusFile+".tmp")
 	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		_ = os.Remove(tmp)
 		return
 	}
 	_ = os.Rename(tmp, filepath.Join(w.cfg.SpoolDir, statusFile))

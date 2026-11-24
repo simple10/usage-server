@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -119,8 +121,8 @@ func (s *state) handleManagement(payload []byte) managementResponse {
 		return b.forward(http.MethodGet, "/ui/", nil, nil, req.Headers)
 	case strings.HasSuffix(req.Path, apiRoute):
 		target := req.Query.Get("path")
-		if !strings.HasPrefix(target, "/api/") || strings.Contains(target, "..") {
-			return textResponse(http.StatusBadRequest, "path must start with /api/")
+		if !validAPIPath(target) {
+			return textResponse(http.StatusBadRequest, "path must be /api/... with letters, digits, '/', '-', '_' or '.'")
 		}
 		q := url.Values{}
 		for k, v := range req.Query {
@@ -136,6 +138,35 @@ func (s *state) handleManagement(payload []byte) managementResponse {
 	default:
 		return textResponse(http.StatusNotFound, "not found")
 	}
+}
+
+// validAPIPath accepts only plain server API paths. It rejects traversal,
+// empty segments, and any character that could change the target URL
+// (query, fragment, percent-encoding, backslash, whitespace).
+func validAPIPath(p string) bool {
+	if !strings.HasPrefix(p, "/api/") || len(p) > 256 {
+		return false
+	}
+	if strings.Contains(p, "..") || strings.Contains(p, "//") {
+		return false
+	}
+	for _, c := range p {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '/', c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isTimeout(ctx context.Context, err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func (b *bridge) forward(method, path string, q url.Values, body []byte, in http.Header) managementResponse {
@@ -162,15 +193,21 @@ func (b *bridge) forward(method, path string, q url.Values, body []byte, in http
 	out.Header.Set("Accept", "application/json, text/html")
 	resp, err := b.client.Do(out)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if isTimeout(ctx, err) {
 			return textResponse(http.StatusGatewayTimeout, "usage server timed out")
 		}
 		return textResponse(http.StatusBadGateway, "usage server unavailable")
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
+		if isTimeout(ctx, err) {
+			return textResponse(http.StatusGatewayTimeout, "usage server timed out")
+		}
 		return textResponse(http.StatusBadGateway, "usage server read failed")
+	}
+	if len(data) > maxBodyBytes {
+		return textResponse(http.StatusBadGateway, "usage server response too large")
 	}
 	h := http.Header{}
 	for _, k := range []string{"Content-Type", "Cache-Control", "Content-Security-Policy"} {

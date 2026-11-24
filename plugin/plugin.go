@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -21,6 +22,11 @@ const (
 	// JSON bodies without HTML-escaping. We need nothing newer.
 	schemaVersion = 6
 )
+
+// repoURL is shown in the proxy's plugin list. The host rejects a plugin whose
+// metadata has an empty Name, Version, Author or GitHubRepository. Override it
+// at build time with -ldflags "-X main.repoURL=https://github.com/<owner>/<repo>".
+var repoURL = "https://example.invalid/usage-server"
 
 // Config is the YAML block under plugins.configs.<id> in the proxy config.
 type Config struct {
@@ -99,13 +105,17 @@ func parseConfig(raw []byte) (Config, error) {
 	return cfg, nil
 }
 
-// state is the plugin's process-wide state. The host may call into the plugin
-// from many goroutines at once, so every field is guarded.
+// state is the plugin's process-wide state. The host calls into the plugin
+// from many goroutines at once. usage.handle runs on the host's shared usage
+// dispatcher, so the hot path only does atomic loads and never takes a lock
+// that a slow operation (closing a writer, a bridge call) could hold.
 type state struct {
-	mu     sync.Mutex
-	cfg    Config
-	spool  *spoolWriter
-	bridge *bridge
+	applyMu sync.Mutex // serializes lifecycle calls only
+	cfg     atomic.Pointer[Config]
+	spool   atomic.Pointer[spoolWriter]
+	bridge  atomic.Pointer[bridge]
+	// exportPanics counts panics recovered at the C ABI boundary.
+	exportPanics atomic.Int64
 }
 
 var global state
@@ -191,7 +201,7 @@ func lifecycle(payload []byte) []byte {
 			"Name":             pluginName,
 			"Version":          pluginVersion,
 			"Author":           "usage-server",
-			"GitHubRepository": "",
+			"GitHubRepository": repoURL,
 			"Logo":             "",
 			"ConfigFields":     []any{},
 		},
@@ -202,48 +212,47 @@ func lifecycle(payload []byte) []byte {
 	})
 }
 
-// apply starts, stops or reconfigures the spool writer and the bridge.
+// apply starts, stops or reconfigures the spool writer and the bridge. The
+// new writer is published before the old one is closed, and the close runs
+// without any lock the hot path uses.
 func (s *state) apply(cfg Config) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cfg = cfg
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	c := cfg
+	s.cfg.Store(&c)
+
+	var old *spoolWriter
 	if !cfg.Enabled {
-		if s.spool != nil {
-			s.spool.close()
-			s.spool = nil
-		}
-		s.bridge = nil
-		return
-	}
-	if s.spool == nil || s.spool.cfgChanged(cfg) {
-		if s.spool != nil {
-			s.spool.close()
-		}
-		w, err := newSpoolWriter(cfg)
-		if err != nil {
-			logger.Printf("spool disabled: %v", err)
-			s.spool = nil
-		} else {
-			s.spool = w
-		}
-	}
-	if cfg.ServerURL != "" {
-		s.bridge = newBridge(cfg.ServerURL, cfg.BridgeToken, time.Duration(cfg.BridgeTimeoutMS)*time.Millisecond)
+		old = s.spool.Swap(nil)
+		s.bridge.Store(nil)
 	} else {
-		s.bridge = nil
+		cur := s.spool.Load()
+		if cur == nil || cur.cfgChanged(cfg) {
+			w, err := newSpoolWriter(cfg)
+			if err != nil {
+				logger.Printf("spool disabled: %v", err)
+			}
+			old = s.spool.Swap(w) // w may be nil
+		}
+		if cfg.ServerURL != "" {
+			s.bridge.Store(newBridge(cfg.ServerURL, cfg.BridgeToken, time.Duration(cfg.BridgeTimeoutMS)*time.Millisecond))
+		} else {
+			s.bridge.Store(nil)
+		}
+	}
+	if old != nil {
+		old.close()
 	}
 }
 
-func (s *state) currentSpool() *spoolWriter {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.spool
-}
+func (s *state) currentSpool() *spoolWriter { return s.spool.Load() }
 
 func (s *state) currentBridge() (*bridge, Config) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.bridge, s.cfg
+	var cfg Config
+	if c := s.cfg.Load(); c != nil {
+		cfg = *c
+	}
+	return s.bridge.Load(), cfg
 }
 
 func (s *state) flush() {
@@ -253,11 +262,10 @@ func (s *state) flush() {
 }
 
 func shutdown() {
-	global.mu.Lock()
-	defer global.mu.Unlock()
-	if global.spool != nil {
-		global.spool.close()
-		global.spool = nil
+	global.applyMu.Lock()
+	defer global.applyMu.Unlock()
+	global.bridge.Store(nil)
+	if w := global.spool.Swap(nil); w != nil {
+		w.close()
 	}
-	global.bridge = nil
 }

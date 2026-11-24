@@ -57,6 +57,7 @@ func main() {}
 func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_api) (rc C.int) {
 	defer func() {
 		if r := recover(); r != nil {
+			global.exportPanics.Add(1)
 			rc = 1
 		}
 	}()
@@ -79,6 +80,8 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			global.exportPanics.Add(1)
+			logger.Printf("recovered from panic in %s: %v", C.GoString(method), r)
 			writeResponse(response, errorEnvelope("plugin_panic", "internal error"))
 			rc = 1
 		}
@@ -108,7 +111,11 @@ func cliproxyPluginFree(ptr unsafe.Pointer, _ C.size_t) {
 
 //export cliproxyPluginShutdown
 func cliproxyPluginShutdown() {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			global.exportPanics.Add(1)
+		}
+	}()
 	shutdown()
 }
 

@@ -83,6 +83,8 @@ type spoolRecord struct {
 	AuthIndex            string            `json:"auth_index,omitempty"`
 	AuthType             string            `json:"auth_type,omitempty"`
 	Source               string            `json:"source,omitempty"`
+	SourceHash           string            `json:"source_hash,omitempty"`
+	SourceHint           string            `json:"source_hint,omitempty"`
 	ReasoningEffort      string            `json:"reasoning_effort,omitempty"`
 	ServiceTier          string            `json:"service_tier,omitempty"`
 	EffectiveServiceTier string            `json:"effective_service_tier,omitempty"`
@@ -114,15 +116,17 @@ var keptHeaderPrefixes = []string{
 	"x-codex-",
 }
 
+// hashKey returns the SHA-256 hex of the exact client key and a short hint.
+// The hint is only set for keys of 12 characters or more, so that it never
+// reveals a large part of a short key.
 func hashKey(key string) (hash, hint string) {
-	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", ""
 	}
 	sum := sha256.Sum256([]byte(key))
 	hash = hex.EncodeToString(sum[:])
-	if len(key) >= 12 {
-		hint = "…" + key[len(key)-4:]
+	if r := []rune(key); len(r) >= 12 {
+		hint = "…" + string(r[len(r)-4:])
 	}
 	return hash, hint
 }
@@ -156,7 +160,6 @@ func toSpoolRecord(in *hostUsageRecord) spoolRecord {
 		AuthID:               in.AuthID,
 		AuthIndex:            in.AuthIndex,
 		AuthType:             in.AuthType,
-		Source:               in.Source,
 		ReasoningEffort:      in.ReasoningEffort,
 		ServiceTier:          in.ServiceTier,
 		EffectiveServiceTier: in.EffectiveServiceTier,
@@ -175,6 +178,7 @@ func toSpoolRecord(in *hostUsageRecord) spoolRecord {
 		CacheWrite1h:         in.Detail.CacheCreation1hTokens,
 		Total:                in.Detail.TotalTokens,
 	}
+	out.Source, out.SourceHash, out.SourceHint = safeSource(in.Source)
 	if in.Failed {
 		out.Status = in.Failure.StatusCode
 		out.Error = truncate(in.Failure.Body, maxErrorChars)
@@ -192,6 +196,22 @@ func toSpoolRecord(in *hostUsageRecord) spoolRecord {
 		}
 	}
 	return out
+}
+
+// safeSource handles the host's Source field. The host fills it with the
+// credential's account (an email for OAuth), or else the upstream API key, or
+// else the client key. Only an email-like value is kept as is; anything else
+// may be a secret and is replaced by a hash and a short hint.
+func safeSource(src string) (raw, hash, hint string) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return "", "", ""
+	}
+	if at := strings.IndexByte(src, '@'); at > 0 && at < len(src)-1 && !strings.ContainsAny(src, " \t/:") {
+		return truncate(src, 256), "", ""
+	}
+	hash, hint = hashKey(src)
+	return "", hash, hint
 }
 
 func truncate(s string, n int) string {
