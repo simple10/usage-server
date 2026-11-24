@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usage</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #dddcd7; --grid: #ebeae6;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --accent: #2a78d6; --critical: #c92a2a; --warning: #a86b00; --good: #2b7a2b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --other: #a3a29c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #33332f; --grid: #262624;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --accent: #3987e5; --critical: #ff6b6b; --warning: #e0a030; --good: #0ca30c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;
+    --other: #6b6a65;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--surface-0); color: var(--text-primary); }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--surface-1); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+nav button, .btn { background: none; border: 1px solid transparent; color: var(--text-secondary); padding: 5px 10px; border-radius: 6px; cursor: pointer; font: inherit; }
+nav button.active { color: var(--text-primary); border-color: var(--border); background: var(--surface-0); }
+.btn { border-color: var(--border); }
+.btn:hover, nav button:hover { color: var(--text-primary); }
+.filters { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+select, input[type=text], input[type=password], input[type=date] { font: inherit; color: var(--text-primary); background: var(--surface-0); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+.card h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
+.card h2 small { font-weight: 400; color: var(--text-muted); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.tile .k { color: var(--text-secondary); font-size: 12px; }
+.tile .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .s { color: var(--text-muted); font-size: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--text-secondary); font-weight: 500; font-size: 12px; cursor: default; white-space: nowrap; }
+th.sortable { cursor: pointer; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--surface-0); }
+.muted { color: var(--text-muted); }
+.err { color: var(--critical); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.est { color: var(--text-muted); font-size: 11px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 2px; font-size: 12px; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.chartwrap { position: relative; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.15); white-space: nowrap; z-index: 5; display: none; }
+.tip .row { display: flex; gap: 8px; justify-content: space-between; }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+svg text { fill: var(--text-muted); font-size: 11px; }
+.pill { display: inline-block; padding: 0 6px; border-radius: 9px; border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); }
+.bad { color: var(--critical); }
+.ok { color: var(--good); }
+dialog { background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 10px; padding: 18px; max-width: 420px; }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+.row-flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hidden { display: none !important; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Usage</h1>
+  <nav id="nav">
+    <button data-view="overview" class="active">Overview</button>
+    <button data-view="breakdown">Breakdown</button>
+    <button data-view="sessions">Sessions</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+  <div class="filters">
+    <label class="muted" for="range">Range</label>
+    <select id="range">
+      <option value="1">Last 24 hours</option>
+      <option value="7" selected>Last 7 days</option>
+      <option value="30">Last 30 days</option>
+      <option value="90">Last 90 days</option>
+      <option value="365">Last 365 days</option>
+    </select>
+    <button class="btn" id="refresh" title="Reload data">Refresh</button>
+  </div>
+</header>
+<main id="main"><p class="muted">Loading…</p></main>
+
+<dialog id="login">
+  <form method="dialog" id="loginform">
+    <p id="loginmsg" style="margin-top:0"></p>
+    <input type="password" id="token" autocomplete="off" style="width:100%" required>
+    <p class="row-flex" style="margin-bottom:0"><button class="btn" value="ok">Save</button><span class="err" id="loginerr"></span></p>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+const STORE = "usage-server.token";
+const BRIDGED = location.pathname.startsWith("/v0/resource/plugins/");
+const API_BASE = BRIDGED ? "/v0/management/usage-server/api" : "/api";
+const SERIES = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+const state = { view: "overview", days: 7, sort: {}, sessionId: null, group: "model", breakdownSort: "cost", q: "" };
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmtN = n => n == null ? "—" : n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? (n / 1e3).toFixed(1) + "k" : String(Math.round(n));
+const fmt$ = (c, known = true) => (c == null || (!known && !c)) ? "—" : "$" + (c >= 100 ? c.toFixed(0) : c >= 1 ? c.toFixed(2) : c.toFixed(4));
+const fmtT = ts => ts ? new Date(ts * 1000).toLocaleString() : "—";
+const fmtD = ts => ts ? new Date(ts * 1000).toLocaleDateString() : "—";
+const short = (s, n = 40) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+
+function token() { return localStorage.getItem(STORE) || ""; }
+function askToken(msg) {
+  return new Promise(resolve => {
+    $("#loginmsg").textContent = msg || (BRIDGED ? "Enter the proxy management key. It is kept in this browser only." : "Enter a usage-server API token. It is kept in this browser only.");
+    $("#token").value = "";
+    const dlg = $("#login");
+    dlg.onclose = () => { const v = $("#token").value.trim(); if (v) localStorage.setItem(STORE, v); resolve(v); };
+    dlg.showModal();
+  });
+}
+
+async function api(path, params = {}, opts = {}) {
+  const q = new URLSearchParams();
+  if (BRIDGED) q.set("path", path);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, v);
+  const url = (BRIDGED ? API_BASE : path) + (q.toString() ? "?" + q : "");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let t = token();
+    if (!t) t = await askToken();
+    const res = await fetch(url, { method: opts.method || "GET", body: opts.body, headers: { "Authorization": "Bearer " + t, ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+    if (res.status === 401) { localStorage.removeItem(STORE); await askToken("That key was not accepted. Try again."); continue; }
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    return data;
+  }
+  throw new Error("unauthorized");
+}
+
+function range() { const to = Math.floor(Date.now() / 1000); return { from: to - state.days * 86400, to }; }
+
+// ---------- chart: stacked bars with hover tooltip ----------
+function stackedBars(el, data, { money = true, height = 220 } = {}) {
+  const buckets = data.buckets || [], series = data.series || [];
+  if (!buckets.length) { el.innerHTML = '<p class="muted">No data in this range.</p>'; return; }
+  const colors = series.map((s, i) => s.key === "__other__" ? css("--other") : css(SERIES[i % SERIES.length]));
+  const totals = buckets.map((_, bi) => series.reduce((a, s) => a + (s.values[bi] || 0), 0));
+  const max = Math.max(...totals, 1e-9);
+  const W = Math.max(el.clientWidth || 600, 300), H = height, L = 52, R = 8, T = 8, B = 22;
+  const iw = W - L - R, ih = H - T - B, bw = iw / buckets.length, barW = Math.max(Math.min(bw - 2, 36), 1);
+  const nice = (() => { const raw = max / 4, p = Math.pow(10, Math.floor(Math.log10(raw))); const m = [1, 2, 2.5, 5, 10].find(m => m * p >= raw); return m * p; })();
+  const dec = (String(+nice.toFixed(6)).split(".")[1] || "").length; // decimals of the tick step
+  const yTop = Math.ceil(max / nice) * nice, y = v => T + ih - (v / yTop) * ih;
+  let svg = `<svg width="${W}" height="${H}" role="img" aria-label="${money ? "Estimated cost" : "Tokens"} by ${data.bucket}">`;
+  for (let v = 0; v <= yTop + 1e-12; v += nice) {
+    svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${css("--grid")}" stroke-width="1"/>`;
+    svg += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${money ? "$" + v.toFixed(dec): fmtN(v)}</text>`;
+  }
+  const step = Math.ceil(buckets.length / Math.max(Math.floor(iw / 70), 1));
+  buckets.forEach((b, bi) => {
+    const x = L + bi * bw + (bw - barW) / 2;
+    let acc = 0;
+    const segs = series.map((s, si) => ({ v: s.values[bi] || 0, si })).filter(s => s.v > 0);
+    segs.forEach((s, k) => {
+      const y0 = y(acc), y1 = y(acc + s.v); acc += s.v;
+      const h = Math.max(y0 - y1 - (k < segs.length - 1 ? 2 : 0), 0.5); // 2px surface gap between segments
+      const top = k === segs.length - 1;
+      svg += top && h > 4
+        ? `<path d="M${x},${y0} V${y1 + 4} Q${x},${y1} ${x + 4},${y1} H${x + barW - 4} Q${x + barW},${y1} ${x + barW},${y1 + 4} V${y0} Z" fill="${colors[s.si]}"/>`
+        : `<rect x="${x}" y="${y0 - h}" width="${barW}" height="${h}" fill="${colors[s.si]}"/>`;
+    });
+    svg += `<rect class="hit" data-b="${bi}" x="${L + bi * bw}" y="${T}" width="${bw}" height="${ih}" fill="transparent"/>`;
+    if (bi % step === 0) svg += `<text x="${L + bi * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(data.bucket === "hour" ? b.slice(5).replace("T", " ") : b.slice(5))}</text>`;
+  });
+  svg += "</svg>";
+  const legend = series.length > 1 ? `<div class="legend">${series.map((s, i) => `<span><i style="background:${colors[i]}"></i>${esc(short(s.label, 32))}</span>`).join("")}</div>` : "";
+  el.innerHTML = `<div class="chartwrap">${svg}<div class="tip"></div></div>${legend}
+    <details><summary class="muted">Table view</summary><table><tr><th>${esc(data.bucket)}</th>${series.map(s => `<th class="n">${esc(short(s.label, 20))}</th>`).join("")}<th class="n">Total</th></tr>
+    ${buckets.map((b, bi) => `<tr><td>${esc(b)}</td>${series.map(s => `<td class="n">${money ? fmt$(s.values[bi]) : fmtN(s.values[bi])}</td>`).join("")}<td class="n">${money ? fmt$(totals[bi]) : fmtN(totals[bi])}</td></tr>`).join("")}</table></details>`;
+  const tip = $(".tip", el), wrap = $(".chartwrap", el);
+  wrap.querySelectorAll(".hit").forEach(r => {
+    r.addEventListener("mousemove", ev => {
+      const bi = +r.dataset.b;
+      const rows = series.map((s, i) => ({ s, i, v: s.values[bi] || 0 })).filter(x => x.v > 0).reverse();
+      tip.innerHTML = `<b>${esc(buckets[bi])}</b> · ${money ? fmt$(totals[bi]) : fmtN(totals[bi])}` + rows.map(x => `<div class="row"><span><i style="background:${colors[x.i]}"></i>${esc(short(x.s.label, 30))}</span><span>${money ? fmt$(x.v) : fmtN(x.v)}</span></div>`).join("");
+      tip.style.display = "block";
+      const bx = wrap.getBoundingClientRect();
+      let left = ev.clientX - bx.left + 12; if (left + tip.offsetWidth > bx.width) left = ev.clientX - bx.left - tip.offsetWidth - 12;
+      tip.style.left = left + "px"; tip.style.top = Math.max(ev.clientY - bx.top - 10, 0) + "px";
+    });
+    r.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  });
+}
+
+// ---------- tables ----------
+function rowsTable(rows, group, { onClick } = {}) {
+  if (!rows.length) return '<p class="muted">No data.</p>';
+  const extra = group === "auth" ? "<th>Type</th>" : group === "session" ? "<th>Project</th>" : "";
+  return `<table><tr><th>${esc(group)}</th>${extra}<th class="n">Requests</th><th class="n">Failed</th><th class="n">Input</th><th class="n">Output</th><th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Est. cost</th></tr>
+  ${rows.map((r, i) => `<tr class="${onClick ? "click" : ""}" data-i="${i}"><td title="${esc(r.key)}">${esc(short(r.label, 48))}${r.hint && r.label !== r.hint ? ` <span class="muted mono">${esc(r.hint)}</span>` : ""}</td>
+    ${group === "auth" ? `<td class="muted">${esc(r.auth_type || "")}</td>` : group === "session" ? `<td class="muted">${esc(r.project || "")}</td>` : ""}
+    <td class="n">${fmtN(r.requests)}</td><td class="n ${r.failed ? "bad" : ""}">${fmtN(r.failed)}</td><td class="n">${fmtN(r.input)}</td><td class="n">${fmtN(r.output)}</td><td class="n">${fmtN(r.cache_read)}</td><td class="n">${fmtN(r.cache_write_5m + r.cache_write_1h)}</td>
+    <td class="n">${r.unpriced_requests && !r.cost ? "—" : fmt$(r.cost)}${r.unpriced_requests ? ' <span class="muted" title="some requests have no price">*</span>' : ""}</td></tr>`).join("")}</table>`;
+}
+function bindRows(el, rows, fn) { el.querySelectorAll("tr.click").forEach(tr => tr.addEventListener("click", () => fn(rows[+tr.dataset.i]))); }
+
+// ---------- views ----------
+const GROUP_NAMES = { api_key: "Client keys", auth: "Upstreams", provider: "Providers", model: "Models", session: "Sessions", project: "Projects" };
+
+async function overview(main) {
+  const r = range();
+  const [sum, ts] = await Promise.all([api("/api/summary", r), api("/api/timeseries", { ...r, bucket: state.days <= 2 ? "hour" : "day", group: "model", top: 6 })]);
+  const t = sum.totals;
+  main.innerHTML = `
+    <div class="tiles">
+      <div class="tile"><div class="k">Estimated cost</div><div class="v">${fmt$(t.cost)}</div><div class="s">at API list prices${t.unpriced_requests ? ` · ${fmtN(t.unpriced_requests)} unpriced` : ""}</div></div>
+      <div class="tile"><div class="k">Requests</div><div class="v">${fmtN(t.requests)}</div><div class="s ${t.failed ? "bad" : ""}">${fmtN(t.failed)} failed</div></div>
+      <div class="tile"><div class="k">Tokens</div><div class="v">${fmtN(t.tokens)}</div><div class="s">${fmtN(t.input)} in · ${fmtN(t.output)} out</div></div>
+      <div class="tile"><div class="k">Cache</div><div class="v">${fmtN(t.cache_read)}</div><div class="s">read · ${fmtN(t.cache_write_5m + t.cache_write_1h)} written</div></div>
+    </div>
+    <div class="card"><h2>Estimated cost by ${ts.bucket}, by model <small>· estimate at API list prices</small></h2><div id="chart"></div></div>
+    <div class="grid3">${["api_key", "auth", "model"].map(g => `<div class="card"><h2>Top ${GROUP_NAMES[g].toLowerCase()}</h2><div id="top-${g}"></div></div>`).join("")}</div>`;
+  stackedBars($("#chart"), ts);
+  for (const g of ["api_key", "auth", "model"]) {
+    const el = $("#top-" + g), rows = sum.top[g];
+    el.innerHTML = rows.length ? `<table>${rows.map((x, i) => `<tr class="click" data-i="${i}"><td title="${esc(x.key)}">${esc(short(x.label, 36))}</td><td class="n">${fmtN(x.requests)}</td><td class="n">${fmt$(x.cost)}</td></tr>`).join("")}</table>` : '<p class="muted">No data.</p>';
+    bindRows(el, rows, x => { state.view = "breakdown"; state.group = g; state.filter = { [g]: x.key }; render(); });
+  }
+}
+
+async function breakdown(main) {
+  const r = range(), f = state.filter || {};
+  main.innerHTML = `<div class="card"><div class="row-flex">
+    <label>Group by <select id="grp">${Object.entries(GROUP_NAMES).map(([k, v]) => `<option value="${k}" ${k === state.group ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+    <label>Sort <select id="srt">${["cost", "requests", "input", "output", "cache_read", "failed"].map(k => `<option ${k === state.breakdownSort ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+    ${Object.entries(f).map(([k, v]) => `<span class="pill">${esc(k)} = ${esc(short(v, 24))} <a href="#" data-unf="${esc(k)}">×</a></span>`).join("")}
+    </div></div>
+    <div class="card"><h2>Estimated cost by ${state.days <= 2 ? "hour" : "day"} <small>· estimate</small></h2><div id="chart"></div></div>
+    <div class="card"><h2>${GROUP_NAMES[state.group]} <small>· click a row to filter</small></h2><div id="tbl"><p class="muted">Loading…</p></div></div>`;
+  $("#grp").onchange = e => { state.group = e.target.value; render(); };
+  $("#srt").onchange = e => { state.breakdownSort = e.target.value; render(); };
+  main.querySelectorAll("[data-unf]").forEach(a => a.onclick = e => { e.preventDefault(); delete f[a.dataset.unf]; render(); });
+  const [bd, ts] = await Promise.all([
+    api("/api/breakdown", { ...r, ...f, group: state.group, sort: state.breakdownSort, limit: 200 }),
+    api("/api/timeseries", { ...r, ...f, bucket: state.days <= 2 ? "hour" : "day", group: state.group, top: 6 }),
+  ]);
+  stackedBars($("#chart"), ts);
+  $("#tbl").innerHTML = rowsTable(bd.rows, state.group, { onClick: true });
+  bindRows($("#tbl"), bd.rows, x => {
+    if (state.group === "session") { state.view = "session"; state.sessionId = x.key; render(); return; }
+    state.filter = { ...f, [state.group]: x.key };
+    state.group = state.group === "model" ? "session" : "model"; render();
+  });
+}
+
+async function sessions(main) {
+  const r = range();
+  main.innerHTML = `<div class="card"><div class="row-flex"><input type="text" id="q" placeholder="Search title, project, branch, ID" value="${esc(state.q)}" style="min-width:280px">
+    <label><input type="checkbox" id="ht" ${state.hasT ? "checked" : ""}> with transcript only</label></div></div>
+    <div class="card"><div id="tbl"><p class="muted">Loading…</p></div></div>`;
+  let timer;
+  $("#q").oninput = e => { clearTimeout(timer); timer = setTimeout(() => { state.q = e.target.value; load(); }, 300); };
+  $("#ht").onchange = e => { state.hasT = e.target.checked; load(); };
+  async function load() {
+    const d = await api("/api/sessions", { ...r, q: state.q, has_transcript: state.hasT ? "1" : "" });
+    const rows = d.rows;
+    $("#tbl").innerHTML = rows.length ? `<table><tr><th>Session</th><th>Project</th><th>Last activity</th><th class="n">Turns</th><th class="n">Proxy req.</th><th class="n">Proxy est. cost</th><th class="n">Transcript est. cost</th></tr>
+      ${rows.map((s, i) => { const t = s.transcript || {}; const p = s.proxy || {}; return `<tr class="click" data-i="${i}"><td title="${esc(s.id)}">${esc(short(t.title || s.transcript_id, 60))}${t.parse_error ? ' <span class="bad" title="parse error">!</span>' : ""}${s.transcript ? "" : ' <span class="pill">no transcript</span>'}</td>
+        <td class="muted">${esc(t.project || "")}${t.git_branch ? ` <span class="mono">${esc(short(t.git_branch, 24))}</span>` : ""}</td><td>${fmtT(t.last_ts || null)}</td><td class="n">${fmtN(t.turns)}</td>
+        <td class="n">${s.proxy ? fmtN(p.requests) : "—"}</td><td class="n">${s.proxy ? fmt$(p.cost) : "—"}</td><td class="n">${s.transcript ? fmt$(t.cost, t.cost_complete) : "—"}</td></tr>`; }).join("")}</table>` : '<p class="muted">No sessions in this range.</p>';
+    bindRows($("#tbl"), rows, s => { state.view = "session"; state.sessionId = s.id; render(); });
+  }
+  await load();
+}
+
+function usageTable(u) {
+  const ms = Object.entries(u || {});
+  if (!ms.length) return '<span class="muted">—</span>';
+  return `<table><tr><th>Model</th><th class="n">Input</th><th class="n">Output</th><th class="n">Cache read</th><th class="n">Write 5m</th><th class="n">Write 1h</th></tr>${ms.map(([m, x]) => `<tr><td>${esc(m)}</td><td class="n">${fmtN(x.input)}</td><td class="n">${fmtN(x.output)}</td><td class="n">${fmtN(x.cache_read)}</td><td class="n">${fmtN(x.cache_write_5m)}</td><td class="n">${fmtN(x.cache_write_1h)}</td></tr>`).join("")}</table>`;
+}
+
+async function session(main) {
+  const d = await api("/api/session", { id: state.sessionId });
+  const t = d.transcript, p = d.proxy, pt = p.totals;
+  main.innerHTML = `<p><a href="#" id="back">← Sessions</a></p>
+    <div class="card"><h2>${esc(t?.title || d.transcript_id)}</h2>
+      <div class="muted mono">${esc(d.id)}</div>
+      ${t ? `<p>${esc(t.project || "")} ${t.git_branch ? `· <span class="mono">${esc(t.git_branch)}</span>` : ""} · ${fmtT(t.first_ts)} → ${fmtT(t.last_ts)} · ${fmtN(t.turns)} turns · peak context ${fmtN(t.peak_context)} · ${fmtN(t.compactions)} compactions · ${fmtN(t.cache_rebuilds)} cache rebuilds · ${fmtN(t.tool_errors)} tool errors</p>
+        ${t.parse_error ? `<p class="err">Parse error: ${esc(t.parse_error)}</p>` : ""}` : '<p class="muted">No transcript found for this session.</p>'}
+      <div class="row-flex"><button class="btn" id="reparse">Re-parse transcript</button><span id="rpmsg" class="muted"></span></div>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Proxy est. cost</div><div class="v">${pt ? fmt$(pt.cost) : "—"}</div><div class="s">${pt ? fmtN(pt.requests) + " requests" : "no proxy records"}</div></div>
+      <div class="tile"><div class="k">Transcript est. cost</div><div class="v">${t ? fmt$(t.cost, t.cost_complete) : "—"}</div><div class="s">${t ? fmtN(t.tokens) + " tokens" : ""}</div></div>
+    </div>
+    ${t ? `<div class="card"><h2>Agents <small>· estimate</small></h2>${t.agents.length || p.by_agent.length ? `<table><tr><th>Agent</th><th>Type</th><th>Description</th><th>Model</th><th class="n">Turns</th><th class="n">Transcript est.</th><th class="n">Proxy est.</th></tr>
+      <tr><td>main</td><td></td><td></td><td></td><td class="n">${fmtN(t.turns)}</td><td class="n"></td><td class="n">${fmt$((p.by_agent.find(a => a.agent_id === "main") || {}).cost)}</td></tr>
+      ${t.agents.map(a => `<tr><td class="mono">${esc(short(a.agent_id, 20))}</td><td>${esc(a.agent_type || "")}</td><td>${esc(short(a.description, 60))}</td><td class="muted">${esc(a.model || "")}</td><td class="n">${fmtN(a.turns)}</td><td class="n">${fmt$(a.cost, a.cost_complete)}</td><td class="n">${a.proxy ? fmt$(a.proxy.cost) : "—"}</td></tr>`).join("")}</table>` : '<p class="muted">No subagents.</p>'}</div>
+    <div class="grid3">
+      <div class="card"><h2>Skills</h2>${t.skills.length ? `<table><tr><th>Skill</th><th class="n">Loads</th><th class="n">Turns</th><th class="n">Est. cost</th></tr>${t.skills.map(s => `<tr><td>${esc(s.skill)}</td><td class="n">${fmtN(s.loads)}</td><td class="n">${fmtN(s.turns)}</td><td class="n">${fmt$(s.cost)}</td></tr>`).join("")}</table>` : '<p class="muted">None.</p>'}</div>
+      <div class="card"><h2>Tools</h2>${Object.keys(t.tools).length ? `<table>${Object.entries(t.tools).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${fmtN(v)}</td></tr>`).join("")}</table>` : '<p class="muted">None.</p>'}</div>
+      <div class="card"><h2>Pull requests</h2>${t.prs.length ? `<table>${t.prs.map(x => `<tr><td><span class="pill">${esc(x.action)}</span></td><td><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.repo)}#${esc(x.number)}</a></td><td class="muted">${fmtT(x.ts)}</td></tr>`).join("")}</table>` : '<p class="muted">None.</p>'}</div>
+    </div>
+    <div class="card"><h2>Transcript usage by model</h2>${usageTable(t.usage_by_model)}</div>` : ""}
+    <div class="grid3">
+      <div class="card"><h2>Proxy by model</h2>${rowsTable(p.by_model, "model")}</div>
+      <div class="card"><h2>Proxy by upstream</h2>${rowsTable(p.by_auth, "auth")}</div>
+    </div>
+    <div class="card"><h2>Timeline <small>· proxy requests</small></h2>${d.timeline.length ? `<table><tr><th>Time</th><th>Agent</th><th>Model</th><th class="n">In</th><th class="n">Out</th><th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Latency</th><th>Status</th></tr>${d.timeline.slice(-300).map(x => `<tr><td>${fmtT(x.ts)}</td><td class="mono">${esc(short(x.agent_id, 18))}</td><td class="muted">${esc(x.model)}</td><td class="n">${fmtN(x.input)}</td><td class="n">${fmtN(x.output)}</td><td class="n">${fmtN(x.cache_read)}</td><td class="n">${fmtN(x.cache_write)}</td><td class="n">${x.latency_ms != null ? x.latency_ms + " ms" : ""}</td><td class="${x.failed ? "bad" : ""}">${x.failed ? "failed " + (x.status || "") : "ok"}</td></tr>`).join("")}</table>` : '<p class="muted">No proxy requests.</p>'}</div>`;
+  $("#back").onclick = e => { e.preventDefault(); state.view = "sessions"; render(); };
+  $("#reparse").onclick = async () => {
+    try { const res = await api("/api/session/reparse", { id: d.id }, { method: "POST" }); $("#rpmsg").textContent = res.queued ? "Queued. Refresh in a few seconds." : "Not found."; }
+    catch (e) { $("#rpmsg").textContent = e.message; }
+  };
+}
+
+async function settings(main) {
+  const [h, pr, lb] = await Promise.all([api("/api/health"), api("/api/prices"), api("/api/labels")]);
+  const r = range();
+  const [keys, auths] = await Promise.all([api("/api/breakdown", { ...r, group: "api_key", limit: 100, from: 0 }), api("/api/breakdown", { ...r, group: "auth", limit: 100, from: 0 })]);
+  const lab = Object.fromEntries(lb.labels.map(l => [l.kind + "\u0000" + l.key, l.label]));
+  const pl = h.plugin;
+  const stale = h.plugin_age_s != null && h.plugin_age_s > 60;
+  main.innerHTML = `
+    <div class="card"><h2>Health</h2><table>
+      <tr><td>Plugin</td><td>${pl ? `${stale ? '<span class="bad">⚠ stale</span>' : '<span class="ok">✓ ok</span>'} v${esc(pl.version)} · updated ${esc(h.plugin_age_s)}s ago · written ${fmtN(pl.written)} · dropped <span class="${pl.dropped ? "bad" : ""}">${fmtN(pl.dropped)}</span> · write errors <span class="${pl.write_errors ? "bad" : ""}">${fmtN(pl.write_errors)}</span> · decode errors ${fmtN(pl.decode_errors)} · panics <span class="${pl.panics ? "bad" : ""}">${fmtN(pl.panics)}</span> · queue ${fmtN(pl.queue_len)}/${fmtN(pl.queue_cap)}` : '<span class="muted">no status file</span>'}</td></tr>
+      <tr><td>Spool</td><td>${h.spool ? `${fmtN(h.spool.files)} files · ${fmtN(h.spool.pending_bytes)} bytes pending · ${fmtN(h.spool.inserted)} inserted · ${fmtN(h.spool.duplicates)} duplicates · <span class="${h.spool.bad_lines ? "bad" : ""}">${fmtN(h.spool.bad_lines)} bad lines</span>` : "—"}</td></tr>
+      <tr><td>Database</td><td>${fmtN(h.requests.count)} requests · last ${fmtT(h.requests.last_ts)}</td></tr>
+      <tr><td>Prices</td><td>${fmtN(h.prices.count)} models · synced ${fmtT(h.prices.synced_at)} ${h.prices.last_error ? `<span class="err">· ${esc(h.prices.last_error)}</span>` : ""}</td></tr>
+      <tr><td>Transcripts</td><td>${h.parser ? `${fmtN(h.parser.sessions)} sessions · ${fmtN(h.parser.queued)} queued · ${fmtN(h.parser.errors)} parse errors · last scan ${fmtT(h.parser.last_scan)}` : '<span class="muted">not running</span>'}</td></tr>
+    </table></div>
+    <div class="grid3">
+      <div class="card"><h2>Client key labels</h2>${labelTable("api_key", keys.rows, lab)}</div>
+      <div class="card"><h2>Upstream labels</h2>${labelTable("auth", auths.rows, lab)}</div>
+    </div>
+    <div class="card"><h2>Prices <small>· models.dev, $ per million tokens</small></h2>
+      ${pr.unknown.length ? `<p class="bad">Models without a price (cost shows —): ${pr.unknown.map(u => esc(u.provider + "/" + u.model)).join(", ")}</p>` : '<p class="ok">✓ Every model seen has a price.</p>'}
+      <table><tr><th>Proxy model</th><th>Priced as</th><th class="n">Input</th><th class="n">Output</th><th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Requests</th></tr>
+      ${pr.used.map(u => `<tr><td>${esc(u.provider)}/${esc(u.model)}</td><td class="muted">${u.price ? esc(u.price.provider + "/" + u.price.model) + (u.price.tiers?.length ? " (tiered)" : "") : "—"}</td><td class="n">${u.price ? u.price.input : ""}</td><td class="n">${u.price ? u.price.output : ""}</td><td class="n">${u.price?.cache_read ?? ""}</td><td class="n">${u.price?.cache_write ?? ""}</td><td class="n">${fmtN(u.requests)}</td></tr>`).join("")}</table></div>
+    <div class="card"><h2>Access</h2><p class="muted">${BRIDGED ? "Using the proxy management key through the proxy panel." : "Using a usage-server API token."}</p><button class="btn" id="logout">Forget key</button></div>`;
+  main.querySelectorAll("input[data-kind]").forEach(inp => inp.addEventListener("change", async () => {
+    try { await api("/api/labels", {}, { method: "POST", body: JSON.stringify({ kind: inp.dataset.kind, key: inp.dataset.key, label: inp.value }) }); inp.style.borderColor = css("--good"); }
+    catch (e) { inp.style.borderColor = css("--critical"); inp.title = e.message; }
+  }));
+  $("#logout").onclick = () => { localStorage.removeItem(STORE); location.reload(); };
+}
+function labelTable(kind, rows, lab) {
+  if (!rows.length) return '<p class="muted">None seen yet.</p>';
+  return `<table><tr><th>${kind === "api_key" ? "Key" : "Upstream"}</th><th>Label</th></tr>${rows.map(r => `<tr><td class="mono" title="${esc(r.key)}">${esc(kind === "api_key" ? (r.hint || "") + " " + short(r.key, 12) : short(r.key, 40))}</td>
+    <td><input type="text" data-kind="${kind}" data-key="${esc(r.key)}" value="${esc(lab[kind + "\u0000" + r.key] || "")}" placeholder="label"></td></tr>`).join("")}</table>`;
+}
+
+const VIEWS = { overview, breakdown, sessions, session, settings };
+async function render() {
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "session" && b.dataset.view === "sessions")));
+  const main = $("#main");
+  try { await VIEWS[state.view](main); }
+  catch (e) { main.innerHTML = `<div class="card err">Could not load: ${esc(e.message)}</div>`; }
+}
+$("#nav").addEventListener("click", e => { const v = e.target.dataset?.view; if (v) { state.view = v; if (v !== "breakdown") state.filter = state.filter; render(); } });
+$("#range").onchange = e => { state.days = +e.target.value; render(); };
+$("#refresh").onclick = () => render();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => render());
+render();
+</script>
+</body>
+</html>

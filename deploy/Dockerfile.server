@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Build stage: resolve and install with uv from the lock file.
+FROM python:3.15-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/app/.venv
+WORKDIR /src
+COPY server/pyproject.toml server/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY server/ ./
+RUN uv sync --frozen --no-dev --no-editable
+
+# Runtime: python:3.15-slim with the venv only (no uv, no build tools).
+FROM python:3.15-slim
+RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin usage \
+ && mkdir -p /data && chown usage /data
+COPY --from=build /app/.venv /app/.venv
+ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 USAGE_DATA_DIR=/data USAGE_SPOOL_DIR=/spool USAGE_TRANSCRIPTS_DIR=/transcripts
+USER usage
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status == 200 else 1)"
+CMD ["python", "-m", "usage_server.main"]
