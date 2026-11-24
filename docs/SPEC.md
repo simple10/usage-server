@@ -375,7 +375,9 @@ class Adapter(Protocol):
 - Skills come from two places:
   - loaded: `tool_use` with `name == "Skill"` and `input.skill`
   - token attribution: the assistant line's `attributionSkill`
-- `custom-title` lines hold the session title.
+- `custom-title` lines hold the session title. Without one, the `ai-title` line (`aiTitle`) is used.
+- Lines of types that never matter (`api-request*`, `attachment`, `queue-operation`, …) are skipped without a JSON parse. They are a large part of the transcript bytes. Parsing runs at about 90 MB/s per process.
+- Assistant lines with model `<synthetic>` are not turns.
 - `system` lines with `subtype == "compact_boundary"` mark compactions. `compactMetadata.preTokens` holds the context size just before.
 - `cwd` and `gitBranch` appear on entries. Derive `project` from `cwd`:
   - Strip worktree suffixes such as `/.claude/worktrees/<name>` and `/.t3/worktrees/<repo>/<id>`.
@@ -386,7 +388,13 @@ class Adapter(Protocol):
 **Pull requests.**
 - *Opened:* a `Bash` `tool_use` whose command contains `gh pr create`, and whose matching `tool_result` has a URL like `https://github.com/<owner>/<repo>/pull/<n>`.
 - *Merged:* a `gh pr merge` call whose result does not report an error. Read the PR number and repo from the command or the output.
+- *Linked:* Claude Code also writes `pr-link` lines (`prUrl`, `prNumber`, `prRepository`). A PR that appears only there gets action `linked`.
 - An optional later step checks the state with the GitHub API.
+
+**Verified in phase 2** (against the real transcripts on the target host):
+- On 319 session/model pairs, the per-`message.id` sums match Claude Code's own `cost-state` totals (median ratio 1.000; 91% of output and 98% of cache-read totals within ±2%). A naive sum over every line is 1.7–1.9 times too high.
+- A 30-day backfill of about 3,100 sessions (9.6 GB) takes about 80 seconds with 2 parser processes. A rescan takes about 0.2 seconds.
+- For a session that ran through the test proxy, proxy cost and transcript cost agree per subagent. The session total differs only by Claude Code's side requests (§3).
 
 **Join with the proxy data.** The adapter's `session_key()` turns the proxy's `session_id` into a transcript session ID: strip the `claude:` prefix and any `:agent:<agent-id>` suffix. The agent ID joins with `session_agents.agent_id` (verified in phase 0, see §3).
 
