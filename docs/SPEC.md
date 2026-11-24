@@ -1,6 +1,6 @@
 # usage-server — specification
 
-Status: draft v0.2. Phase 0 is done: the plugin is built, tested, and verified against a CLIProxyAPI v8.0.80 test proxy (§10 has the answers it gave).
+Status: v0.3. Phases 0–4 are done on a side-by-side test proxy (CLIProxyAPI v8.0.80). Production cutover has not happened; see `deploy/RUNBOOK.md`.
 
 ## 1. Goal
 
@@ -445,6 +445,21 @@ Run a **separate test proxy** with its own compose project, port and data folder
   - The dashboard works both standalone and in the test proxy's management panel.
   - Stopping the server, then filling the disk or corrupting a spool line, has no effect on test proxy traffic.
   - Sending `SIGSTOP` to the server has no effect on test proxy latency.
+
+### 7.3 Robustness results (phase 4, test proxy)
+
+Each check sent small requests through the test proxy and compared with a baseline (upstream p50 354 ms / p95 423 ms; a local endpoint p50 1 ms).
+
+| check | proxy traffic | plugin and server |
+|---|---|---|
+| server stopped | 20/20 OK, p50 355 ms | spool kept growing; bridge 502 in 4 ms; on restart the server caught up with no loss |
+| server `SIGSTOP` + 6 bridge calls in flight | 20/20 OK, p50 367 ms, local p95 1 ms | bridge calls returned 504 at 5.0 s; caught up after `SIGCONT` |
+| corrupt spool lines appended to the live file | 20/20 OK | 3 bad lines skipped and counted; ingestion continued |
+| spool disk full (256 KB tmpfs) | 30/30 OK, p50 370 ms | 2 write attempts in 30 records (5 s back-off); no empty files left; status file frozen, so the dashboard shows the plugin as stale |
+| plugin disabled in config (hot reload) | 20/20 OK | plugin unloaded; no spool lines; menu and bridge 404; re-enabling reloaded it |
+| `.so` removed, proxy restarted | 5/5 OK | proxy started normally with the plugin config still present |
+
+Found and fixed during phase 4: a partial last line left in a closed file (the disk filled mid-line) would have shown as permanent lag. The reader now skips such a tail as one bad line once the plugin has moved to another file and the file has been idle for 60 seconds.
 
 ## 8. Later harnesses
 

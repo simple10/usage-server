@@ -1,0 +1,33 @@
+# Example: add usage-server next to an existing CLIProxyAPI compose service.
+# Replace every <placeholder>. Keep real values in a private file, never in git.
+#
+# Only the two marked volume lines are added to the existing proxy service.
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:<proxy-version>
+    # ... keep the existing settings of your proxy service ...
+    volumes:
+      - <proxy-home>/config.yaml:/CLIProxyAPI/config.yaml
+      - <proxy-home>/auths:/root/.cli-proxy-api
+      - <proxy-home>/logs:/CLIProxyAPI/logs
+      - <proxy-home>/plugins:/CLIProxyAPI/plugins:ro        # added: holds usage-server.so
+      - <proxy-home>/usage-spool:/CLIProxyAPI/usage-spool    # added: plugin writes here
+
+  usage-server:
+    image: usage-server:<version>
+    restart: unless-stopped
+    user: "<uid>:<gid>"                  # must be able to read the transcript folder
+    env_file: [<private-dir>/usage-server.env]   # USAGE_BRIDGE_TOKEN=..., USAGE_API_TOKENS=...
+    environment:
+      - USAGE_PORT=8080
+      # Optional: let standalone users log in with the proxy management key.
+      # - USAGE_CPA_URL=http://cli-proxy-api:8317
+    volumes:
+      - <proxy-home>/usage-spool:/spool:ro
+      - <claude-home>/.claude/projects:/transcripts/claude:ro
+      - <data-dir>:/data
+    # Reachable by the proxy as http://usage-server:8080 on a shared network.
+    # If the proxy uses network_mode: host, publish on loopback instead and
+    # set the plugin's server-url to http://127.0.0.1:<port>:
+    # ports: ["127.0.0.1:<port>:8080"]
+    deploy: {resources: {limits: {memory: 512M}}}

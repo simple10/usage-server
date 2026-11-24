@@ -164,3 +164,18 @@ def test_prune_keeps_rollup(db, tmp_path):
     assert count(db) == 1
     with db.read() as c:
         assert c.execute("SELECT SUM(requests) FROM daily_rollup").fetchone()[0] == 2
+
+
+def test_stale_partial_tail_in_closed_file(db, tmp_path):
+    sp = tmp_path / "spool"; sp.mkdir()
+    old = sp / "usage-20261124T100000-aaaaaaaa.jsonl"
+    cur = sp / "usage-20261124T110000-bbbbbbbb.jsonl"
+    old.write_text(line() + '{"v":1,"request_id":"cut-off')  # disk filled mid-line
+    cur.write_text(line() + '{"v":1,"request_id":"in-progress')
+    (sp / "_plugin_status.json").write_text(json.dumps({"current_file": cur.name}))
+    past = os.stat(old).st_mtime - 3600
+    os.utime(old, (past, past)); os.utime(cur, (past, past))
+    r = SpoolReader(db, sp)
+    assert r.run_once() == 2
+    assert r.stats["bad_lines"] == 1          # the old file's tail, skipped
+    assert r.lag()["pending_bytes"] == len('{"v":1,"request_id":"in-progress')  # current file still waits

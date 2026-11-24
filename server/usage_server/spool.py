@@ -24,6 +24,7 @@ log = logging.getLogger("usage_server.spool")
 STATUS_FILE = "_plugin_status.json"
 MAX_READ_BYTES = 8 * 1024 * 1024  # per file per pass, bounds memory
 MAX_LINE_BYTES = 4 * 1024 * 1024  # a longer "line" without newline is garbage
+STALE_TAIL_SECONDS = 60  # a partial last line in a closed, idle file will never complete
 
 COLUMNS = [
     "request_id", "trace_id", "ts", "provider", "executor", "base_url", "model", "alias",
@@ -224,10 +225,11 @@ class SpoolReader:
                 offsets = {row["file"]: (row["inode"], row["offset"]) for row in r.execute("SELECT * FROM spool_offsets")}
             inserted = 0
             present = set()
+            current = self._current_file()
             for path in files:
                 present.add(path.name)
                 try:
-                    inserted += self._read_file(path, offsets.get(path.name))
+                    inserted += self._read_file(path, offsets.get(path.name), current)
                 except FileNotFoundError:
                     present.discard(path.name)  # deleted between list and open
                 except OSError:
@@ -241,7 +243,11 @@ class SpoolReader:
             self.stats["last_pass"] = time.time()
             return inserted
 
-    def _read_file(self, path: Path, saved: tuple[int, int] | None) -> int:
+    def _current_file(self) -> str | None:
+        st = self.plugin_status()
+        return st.get("current_file") if st else None
+
+    def _read_file(self, path: Path, saved: tuple[int, int] | None, current: str | None = None) -> int:
         inserted = 0
         with open(path, "rb") as fh:
             st = os.fstat(fh.fileno())
@@ -260,7 +266,13 @@ class SpoolReader:
                         self._commit(path, st.st_ino, offset + len(chunk), [], bad=1)
                         offset += len(chunk)
                         continue
-                    break  # partial last line: wait for the rest
+                    # Partial last line: wait for the rest, unless the plugin has
+                    # moved on (e.g. the disk filled mid-line) and the file is idle.
+                    if path.name != current and time.time() - st.st_mtime > STALE_TAIL_SECONDS:
+                        self._commit(path, st.st_ino, offset + len(chunk), [], bad=1)
+                        offset += len(chunk)
+                        continue
+                    break
                 body = chunk[: end + 1]
                 rows, bad = [], 0
                 for raw in body.split(b"\n"):
