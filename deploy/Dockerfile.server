@@ -17,5 +17,5 @@ COPY --from=build /app/.venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 USAGE_DATA_DIR=/data USAGE_SPOOL_DIR=/spool USAGE_TRANSCRIPTS_DIR=/transcripts
 USER usage
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status == 200 else 1)"
+HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import os,sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('USAGE_PORT', '8080'), timeout=2).status == 200 else 1)"
 CMD ["python", "-m", "usage_server.main"]
