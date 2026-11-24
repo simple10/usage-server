@@ -14,4 +14,4 @@ if [ "${1:-}" = "--no-test" ]; then "$ROOT/scripts/build-plugin.sh"; else "$ROOT
 docker build -f deploy/Dockerfile.server \
   --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
   -t "${IMAGE:-usage-server:$VERSION}" .
-echo "built usage-server:$VERSION ($REVISION) and plugin/build/usage-server.so"
+echo "built ${IMAGE:-usage-server:$VERSION} ($REVISION) and plugin/build/usage-server.so"
