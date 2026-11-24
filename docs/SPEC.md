@@ -1,6 +1,6 @@
 # usage-server — specification
 
-Status: draft v0.1. The plugin is a first draft that has never been built or tested. The server does not exist yet.
+Status: draft v0.2. Phase 0 is done: the plugin is built, tested, and verified against a CLIProxyAPI v8.0.80 test proxy (§10 has the answers it gave).
 
 ## 1. Goal
 
@@ -62,13 +62,15 @@ Why this split:
 - **Plugin ID and config.**
   - The plugin ID is the file name: `usage-server.so` gives `usage-server`.
   - The host looks for the file in `<plugins.dir>/<goos>/<goarch>/` first, then in `<plugins.dir>/`.
-  - The plugin receives the YAML subtree under `plugins.configs.usage-server` as `config_yaml` (base64 in JSON).
+  - The plugin receives the YAML subtree under `plugins.configs.usage-server` as `config_yaml` (base64 in JSON). The host adds `enabled` and `priority` keys to it.
+  - The host rejects a plugin whose registration metadata has an empty `Name`, `Version`, `Author` or `GitHubRepository`. The plugin sends a placeholder repository URL unless one is set at build time.
 - **Methods this plugin uses:**
   - `plugin.register`, `plugin.reconfigure`, `plugin.quiesce`, `plugin.shutdown`
   - `usage.handle`
   - `management.register`, `management.handle`
 - **The `usage.handle` payload** is `pluginapi.UsageRecord`, with Go field names as JSON keys (the struct has no JSON tags). It includes:
   - `APIKey`: the raw client key. It must never be written as is.
+  - `Source`: **may also be a secret.** The host fills it with the credential's account (an email for OAuth), or else the upstream API key, or else the client key. Verified: for an API-key credential it is the raw upstream key.
   - `AuthID`, `AuthIndex`, `AuthType`
   - `Provider`, `BaseURL`, `Model`, `Alias`, `ResponseModel`
   - `SessionID`, `ParentSessionID`
@@ -94,9 +96,14 @@ Why this split:
 - **Hot reload.**
   - A config reload calls `plugin.reconfigure`.
   - When the library file is replaced, the old image stays loaded on purpose. Restart the proxy after you upgrade the plugin.
-- **Session IDs.**
-  - The host fills `SessionID` from client session headers. Claude Code sends one.
-  - It is not yet confirmed whether the value equals the Claude Code transcript file name, or carries a prefix such as `claude:`. Test this in phase 0.
+- **Session IDs** (verified in phase 0 with Claude Code 2.1 through the test proxy).
+  - The host fills `SessionID` from the `X-Claude-Code-Session-Id` header (or `metadata.user_id` in the body).
+  - Main session: `SessionID` is `claude:<uuid>`. `<uuid>` is the transcript file name `<uuid>.jsonl`.
+  - Subagent: `SessionID` is `claude:<uuid>:agent:<agent-id>` and `ParentSessionID` is `claude:<uuid>`. `<agent-id>` is the subagent file name `<uuid>/subagents/agent-<agent-id>.jsonl`.
+  - A nested subagent gets `ParentSessionID` `claude:<uuid>:agent:<parent-agent-id>`.
+  - Token counts in the records match the transcript's `usage` per `message.id` exactly.
+  - Claude Code also makes small side requests (for example title generation) that carry the session ID but appear in no transcript. So proxy totals for a session can be a little higher than transcript totals.
+- **Retries.** When the proxy retries a request on another credential, **each attempt makes its own record**. The attempts share `trace_id`; each has its own `request_id`. A failed attempt has `Failed`, a status and zero tokens.
 - **Built-in alternative we decided not to use.**
   - `observability.usage.usage-statistics-enabled` turns on a built-in queue that is read with `GET /v0/management/observability/usage/queue`.
   - Reading a record removes it, and records last at most 1 hour.
@@ -135,8 +142,10 @@ plugins:
 4. Retention: delete closed files past `retention-days`, then delete the oldest closed files while the total is above `max-total-mb`. Never delete the open file.
 5. Every 10 seconds, write `_plugin_status.json` with these counters: written, dropped, write errors, decode errors, panics, queue length. Write it to a temp file and rename it, so readers never see a partial file.
 6. Every exported function and every goroutine recovers from panics. The writer goroutine restarts after a panic.
-7. On a disk error, drop the file handle, count the error, and open a new file on the next record.
-8. `plugin.shutdown` and `enabled: false` drain the queue and close the file, waiting at most 3 seconds.
+   - `usage.handle` takes no lock. It reads the current writer through an atomic pointer, so a reconfigure that waits for an old writer to close never stalls usage delivery.
+7. On a disk error, drop the file handle and count the error. Records still in the write buffer count as dropped. For the next 5 seconds new records are dropped (and counted) without touching the disk; then the next record opens a new file. A failed file that is still empty is removed, so a full disk does not fill up with empty files.
+8. Records count as `written` only once they are flushed to the file.
+9. `plugin.shutdown` and `enabled: false` drain the queue and close the file, waiting at most 3 seconds.
 
 ### 4.3 Spool record (v1)
 
@@ -154,7 +163,9 @@ The record is one JSON object on one line. These field names are the contract be
 | `access_provider` | |
 | `session_id`, `parent_session_id` | as the host gives them |
 | `auth_id`, `auth_index`, `auth_type` | upstream credential. An OAuth `auth_id` may contain an account email. It is local data, but never commit it. |
-| `source`, `reasoning_effort`, `service_tier`, `effective_service_tier` | |
+| `source` | the host's `Source`, only when it looks like an email (OAuth account). Local data; never commit it. |
+| `source_hash`, `source_hint` | any other `Source` value (it may be an API key): SHA-256 hex and `…` plus the last 4 characters, like the client key |
+| `reasoning_effort`, `service_tier`, `effective_service_tier` | |
 | `stream`, `generate` | |
 | `failed`, `status`, `error` | `error` is cut to 512 characters |
 | `latency_ms`, `ttft_ms` | |
@@ -173,7 +184,7 @@ The record is one JSON object on one line. These field names are the contract be
 ### 4.5 Build
 
 - Build with `CGO_ENABLED=1 go build -buildmode=c-shared -o usage-server.so .`, on the same libc and architecture as the proxy image. The official image is Debian 12 (glibc).
-- Build inside a `golang:<ver>-bookworm` container on the target host.
+- Build inside a `golang:<ver>-bookworm` container on the target host. `scripts/build-plugin.sh test` runs vet, the race tests and the build.
 - Do not build on macOS for deployment.
 
 ## 5. Server (`server/`, Python 3.15)
@@ -371,7 +382,7 @@ class Adapter(Protocol):
 - *Merged:* a `gh pr merge` call whose result does not report an error. Read the PR number and repo from the command or the output.
 - An optional later step checks the state with the GitHub API.
 
-**Join with the proxy data.** The adapter's `session_key()` turns the proxy's `session_id` into a transcript session ID. Strip any `claude:` prefix, and confirm the format in phase 0.
+**Join with the proxy data.** The adapter's `session_key()` turns the proxy's `session_id` into a transcript session ID: strip the `claude:` prefix and any `:agent:<agent-id>` suffix. The agent ID joins with `session_agents.agent_id` (verified in phase 0, see §3).
 
 **Privacy.** Never copy message text into the database. Titles, cwd, subagent descriptions and command names are fine.
 
@@ -439,6 +450,6 @@ Run a **separate test proxy** with its own compose project, port and data folder
 
 ## 10. Open questions
 
-1. The `SessionID` format the host sends for Claude Code requests, and for subagent requests (`ParentSessionID`?).
-2. Whether a request that the proxy retries on another credential produces one usage record or several.
+1. ~~The `SessionID` format~~ Answered in phase 0: `claude:<uuid>` for the main session, `claude:<uuid>:agent:<agent-id>` with `ParentSessionID` `claude:<uuid>` for subagents (§3).
+2. ~~Retries~~ Answered in phase 0: one record per attempt, sharing `trace_id` (§3). The server counts each record as a request and reports failed attempts separately.
 3. A license for the public repo.

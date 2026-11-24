@@ -24,8 +24,9 @@ reference/   local copies of reference scripts (gitignored, not published)
 Build on Linux with the same libc and architecture as the proxy image. The official image is Debian 12 (glibc):
 
 ```sh
-docker run --rm -v "$PWD/plugin":/src -w /src golang:1.26-bookworm \
-  sh -c 'CGO_ENABLED=1 go build -buildmode=c-shared -o build/usage-server.so .'
+scripts/build-plugin.sh test   # go vet, go test -race, then build plugin/build/usage-server.so
 ```
+
+It runs `CGO_ENABLED=1 go build -buildmode=c-shared` inside `golang:1.26-bookworm`. Set `REPO_URL` to put your repository URL in the plugin metadata.
 
 The file name sets the plugin ID: `usage-server.so` gives `usage-server`.
