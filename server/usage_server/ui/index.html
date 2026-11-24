@@ -119,14 +119,17 @@ const fmtD = ts => ts ? new Date(ts * 1000).toLocaleDateString() : "—";
 const short = (s, n = 40) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 
 function token() { return localStorage.getItem(STORE) || ""; }
+let pendingAsk = null; // one prompt shared by all requests that need a key
 function askToken(msg) {
-  return new Promise(resolve => {
+  if (pendingAsk) return pendingAsk;
+  pendingAsk = new Promise(resolve => {
     $("#loginmsg").textContent = msg || (BRIDGED ? "Enter the proxy management key. It is kept in this browser only." : "Enter a usage-server API token. It is kept in this browser only.");
     $("#token").value = "";
     const dlg = $("#login");
-    dlg.onclose = () => { const v = $("#token").value.trim(); if (v) localStorage.setItem(STORE, v); resolve(v); };
+    dlg.onclose = () => { const v = $("#token").value.trim(); if (v) localStorage.setItem(STORE, v); pendingAsk = null; resolve(v); };
     dlg.showModal();
   });
+  return pendingAsk;
 }
 
 async function api(path, params = {}, opts = {}) {
@@ -138,7 +141,11 @@ async function api(path, params = {}, opts = {}) {
     let t = token();
     if (!t) t = await askToken();
     const res = await fetch(url, { method: opts.method || "GET", body: opts.body, headers: { "Authorization": "Bearer " + t, ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
-    if (res.status === 401) { localStorage.removeItem(STORE); await askToken("That key was not accepted. Try again."); continue; }
+    if (res.status === 401) {
+      if (token() === t) localStorage.removeItem(STORE); // another request may have saved a new key already
+      if (!token()) await askToken("That key was not accepted. Try again.");
+      continue;
+    }
     const text = await res.text();
     let data; try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
     if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
