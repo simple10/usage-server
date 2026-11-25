@@ -119,6 +119,8 @@ class App:
         p = dict(request.query_params)
         frm, to = queries.time_range(p)
         filters = {k: p[k] for k in queries.FILTERS if p.get(k)}
+        if p.get("source") in queries.SOURCES:
+            filters["source"] = p["source"]
         return frm, to, filters
 
     # -- endpoints --

@@ -77,6 +77,20 @@ MIGRATIONS: list[str] = [
       PRIMARY KEY(harness, session_id, url, action)
     );
     """,
+    # v2: transcript usage per hour, so Overview and Breakdown can use transcripts
+    # where the proxy has no data. Clearing mtime makes the scanner re-parse all.
+    """
+    CREATE TABLE transcript_usage(
+      harness TEXT NOT NULL, session_id TEXT NOT NULL,
+      usage_session TEXT NOT NULL, root_session TEXT NOT NULL,
+      hour REAL NOT NULL, model TEXT NOT NULL, prompt INT NOT NULL,
+      messages INT NOT NULL, input INT NOT NULL, output INT NOT NULL, cache_read INT NOT NULL,
+      cache_write_5m INT NOT NULL, cache_write_1h INT NOT NULL,
+      PRIMARY KEY(harness, session_id, usage_session, hour, model, prompt)
+    );
+    CREATE INDEX transcript_usage_hour ON transcript_usage(hour);
+    UPDATE sessions SET mtime = NULL;
+    """,
 ]
 
 

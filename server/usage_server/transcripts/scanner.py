@@ -237,7 +237,7 @@ class Scanner:
                 (harness, sid, path, mtime, size, now, s["title"], s["cwd"], s["project"], s["git_branch"], s["first_ts"],
                  s["last_ts"], s["turns"], s["peak_context"], s["compactions"], s["cache_rebuilds"], s["tool_errors"],
                  json.dumps(s["usage_by_model"]), json.dumps(s["tools"])))
-            for table in ("session_agents", "session_skills", "session_prs"):
+            for table in ("session_agents", "session_skills", "session_prs", "transcript_usage"):
                 w.execute(f"DELETE FROM {table} WHERE harness = ? AND session_id = ?", (harness, sid))
             w.executemany(
                 "INSERT OR REPLACE INTO session_agents(harness, session_id, agent_id, agent_type, description, model, turns, usage_by_model) "
@@ -250,6 +250,10 @@ class Scanner:
             w.executemany(
                 "INSERT OR REPLACE INTO session_prs(harness, session_id, repo, number, url, action, ts) VALUES (?,?,?,?,?,?,?)",
                 [(harness, sid, p["repo"], p["number"], p["url"], p["action"], p["ts"]) for p in s["prs"]])
+            w.executemany(
+                "INSERT INTO transcript_usage(harness, session_id, usage_session, root_session, hour, model, prompt, "
+                "messages, input, output, cache_read, cache_write_5m, cache_write_1h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(harness, sid, h[0], f"{harness}:{sid}", *h[1:]) for h in s.get("hourly", [])])
         self.stats["parsed"] += 1
 
     def status(self) -> dict[str, Any]:

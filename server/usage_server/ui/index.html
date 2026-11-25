@@ -41,6 +41,7 @@ main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
 .card h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
 .card h2 small { font-weight: 400; color: var(--text-muted); }
+.split { margin: -6px 0 14px; font-size: 13px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
 .tile .k { color: var(--text-secondary); font-size: 12px; }
@@ -93,6 +94,12 @@ a { color: var(--accent); }
       <option value="90">Last 90 days</option>
       <option value="365">Last 365 days</option>
     </select>
+    <label class="muted" for="source" id="source-label">Data</label>
+    <select id="source" title="Proxy: every request through the proxy, since the plugin was turned on. Transcripts: Claude Code history on disk. All: per session and hour, proxy data where it exists, else transcripts.">
+      <option value="all">All data</option>
+      <option value="proxy">Proxy only</option>
+      <option value="transcript">Transcripts only</option>
+    </select>
     <button class="btn" id="refresh" title="Reload data">Refresh</button>
   </div>
 </header>
@@ -113,7 +120,7 @@ const BRIDGED = location.pathname.startsWith("/v0/resource/plugins/");
 const API_BASE = BRIDGED ? "/v0/management/usage-server/api" : "/api";
 if (BRIDGED) document.body.classList.add("bridged");
 const SERIES = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
-const state = { view: "overview", days: 7, sort: {}, sessionId: null, group: "model", breakdownSort: "cost", q: "" };
+const state = { view: "overview", source: localStorage.getItem("usage-server.source") || "all", days: 7, sort: {}, sessionId: null, group: "model", breakdownSort: "cost", q: "" };
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -159,7 +166,7 @@ async function api(path, params = {}, opts = {}) {
   throw new Error("unauthorized");
 }
 
-function range() { const to = Math.floor(Date.now() / 1000); return { from: to - state.days * 86400, to }; }
+function range() { const to = Math.floor(Date.now() / 1000); return { from: to - state.days * 86400, to, source: state.source }; }
 
 // ---------- chart: stacked bars with hover tooltip ----------
 function stackedBars(el, data, { money = true, height = 220 } = {}) {
@@ -221,13 +228,21 @@ function rowsTable(rows, group, { onClick } = {}) {
   return `<table><tr><th>${esc(group)}</th>${extra}<th class="n">Requests</th><th class="n">Failed</th><th class="n">Input</th><th class="n">Output</th><th class="n">Cache read</th><th class="n">Cache write</th><th class="n">Est. cost</th></tr>
   ${rows.map((r, i) => `<tr class="${onClick ? "click" : ""}" data-i="${i}"><td title="${esc(r.key)}">${esc(short(r.label, 48))}${r.hint && r.label !== r.hint ? ` <span class="muted mono">${esc(r.hint)}</span>` : ""}</td>
     ${group === "auth" ? `<td class="muted">${esc(r.auth_type || "")}</td>` : group === "session" ? `<td class="muted">${esc(r.project || "")}</td>` : ""}
-    <td class="n">${fmtN(r.requests)}</td><td class="n ${r.failed ? "bad" : ""}">${fmtN(r.failed)}</td><td class="n">${fmtN(r.input)}</td><td class="n">${fmtN(r.output)}</td><td class="n">${fmtN(r.cache_read)}</td><td class="n">${fmtN(r.cache_write_5m + r.cache_write_1h)}</td>
+    <td class="n">${fmtN(r.requests)}</td><td class="n ${r.failed ? "bad" : ""}">${r.key === "~transcript" ? '<span class="muted" title="Transcripts do not record failed requests">—</span>' : fmtN(r.failed)}</td><td class="n">${fmtN(r.input)}</td><td class="n">${fmtN(r.output)}</td><td class="n">${fmtN(r.cache_read)}</td><td class="n">${fmtN(r.cache_write_5m + r.cache_write_1h)}</td>
     <td class="n">${r.unpriced_requests && !r.cost ? "—" : fmt$(r.cost)}${r.unpriced_requests ? ' <span class="muted" title="some requests have no price">*</span>' : ""}</td></tr>`).join("")}</table>`;
 }
 function bindRows(el, rows, fn) { el.querySelectorAll("tr.click").forEach(tr => tr.addEventListener("click", () => fn(rows[+tr.dataset.i]))); }
 
 // ---------- views ----------
 const GROUP_NAMES = { api_key: "Client keys", auth: "Upstreams", provider: "Providers", model: "Models", session: "Sessions", project: "Projects" };
+
+function sourceSplit(bs) {
+  const p = bs.proxy || { cost: 0, requests: 0 }, t = bs.transcript || { cost: 0, requests: 0 }, all = p.cost + t.cost;
+  if (!all && !p.requests && !t.requests) return "";
+  const pct = v => all ? Math.round(100 * v / all) + "%" : "–";
+  return `<p class="muted split" title="Per session and hour: proxy data where it exists, else the Claude Code transcript. Transcript requests are assistant replies; retries and failures are not in transcripts.">
+    Cost from proxy ${fmt$(p.cost)} (${pct(p.cost)}, ${fmtN(p.requests)} requests) · from transcripts ${fmt$(t.cost)} (${pct(t.cost)}, ${fmtN(t.requests)} replies)</p>`;
+}
 
 async function overview(main) {
   const r = range();
@@ -240,6 +255,7 @@ async function overview(main) {
       <div class="tile"><div class="k">Tokens</div><div class="v">${fmtN(t.tokens)}</div><div class="s">${fmtN(t.input)} in · ${fmtN(t.output)} out</div></div>
       <div class="tile"><div class="k">Cache</div><div class="v">${fmtN(t.cache_read)}</div><div class="s">read · ${fmtN(t.cache_write_5m + t.cache_write_1h)} written</div></div>
     </div>
+    ${sourceSplit(sum.by_source || {})}
     <div class="card"><h2>Estimated cost by ${ts.bucket}, by model <small>· estimate at API list prices</small></h2><div id="chart"></div></div>
     <div class="grid3">${["api_key", "auth", "model"].map(g => `<div class="card"><h2>Top ${GROUP_NAMES[g].toLowerCase()}</h2><div id="top-${g}"></div></div>`).join("")}</div>`;
   stackedBars($("#chart"), ts);
@@ -376,12 +392,16 @@ const VIEWS = { overview, breakdown, sessions, session, settings };
 async function render() {
   document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "session" && b.dataset.view === "sessions")));
   const main = $("#main");
+  const merged = state.view === "overview" || state.view === "breakdown";
+  $("#source").hidden = $("#source-label").hidden = !merged;
   try { await VIEWS[state.view](main); }
   catch (e) { main.innerHTML = `<div class="card err">Could not load: ${esc(e.message)}</div>`; }
 }
 $("#nav").addEventListener("click", e => { const v = e.target.dataset?.view; if (v) { state.view = v; if (v !== "breakdown") state.filter = state.filter; render(); } });
 $("#range").onchange = e => { state.days = +e.target.value; render(); };
 $("#refresh").onclick = () => render();
+$("#source").value = state.source;
+$("#source").onchange = e => { state.source = e.target.value; localStorage.setItem("usage-server.source", state.source); render(); };
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => render());
 render();
 </script>

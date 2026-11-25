@@ -28,9 +28,12 @@ HARNESS = (
     f"THEN substr({ROOT_SESSION}, 1, instr({ROOT_SESSION}, ':') - 1) ELSE NULL END"
 )
 
+TRANSCRIPT_GROUP = "~transcript"  # API key / credential group for transcript usage
+
 GROUPS: dict[str, str] = {
-    "api_key": "COALESCE(api_key_hash, '')",
-    "auth": "COALESCE(requests.auth_id, '')",
+    "api_key": f"CASE WHEN src = 'transcript' THEN '{TRANSCRIPT_GROUP}' ELSE COALESCE(api_key_hash, '') END",
+    "auth": f"CASE WHEN src = 'transcript' THEN '{TRANSCRIPT_GROUP}' ELSE COALESCE(requests.auth_id, '') END",
+    "source": "src",
     "provider": "COALESCE(provider, '')",
     "model": "COALESCE(model, '')",
     "session": f"COALESCE({ROOT_SESSION}, '')",
@@ -40,8 +43,8 @@ GROUPS: dict[str, str] = {
     "hour": "strftime('%Y-%m-%dT%H:00', ts, 'unixepoch')",
 }
 FILTERS: dict[str, str] = {
-    "api_key": "api_key_hash = ?",
-    "auth": "auth_id = ?",
+    "api_key": GROUPS["api_key"] + " = ?",
+    "auth": GROUPS["auth"] + " = ?",
     "provider": "provider = ?",
     "model": "model = ?",
     "session": f"{ROOT_SESSION} = ?",
@@ -72,6 +75,45 @@ def time_range(params: dict[str, str]) -> tuple[float, float]:
     return frm, to
 
 
+SOURCES = ("all", "proxy", "transcript")
+
+# One row per proxy request, plus one row per transcript (session, hour, model,
+# prompt band) where the proxy has no record for that root session in that hour.
+# The proxy wins when both exist: it also sees side calls and retries.
+# Before raw_cutoff (raw proxy rows pruned) the check uses the daily rollup.
+_PROXY_ROWS = (
+    "SELECT ts, 'proxy' AS src, 1 AS n, provider, model, api_key_hash, auth_id, session_id, "
+    "COALESCE(failed, 0) AS failed, input, output, cache_read, cache_write_5m, cache_write_1h, "
+    "cache_write, COALESCE(input,0) + COALESCE(cache_read,0) + COALESCE(cache_write,0) AS prompt "
+    "FROM requests WHERE ts >= ? AND ts < ?"
+)
+_TRANSCRIPT_ROWS = (
+    "SELECT t.hour AS ts, 'transcript' AS src, t.messages AS n, t.harness AS provider, t.model, "
+    "NULL AS api_key_hash, NULL AS auth_id, t.usage_session AS session_id, 0 AS failed, "
+    "t.input, t.output, t.cache_read, t.cache_write_5m, t.cache_write_1h, "
+    "t.cache_write_5m + t.cache_write_1h AS cache_write, t.prompt "
+    "FROM transcript_usage t WHERE t.hour >= ? AND t.hour < ? "
+    "AND NOT EXISTS (SELECT 1 FROM requests r WHERE r.session_id >= t.root_session "
+    "AND r.session_id < t.root_session || ';' AND r.ts >= t.hour AND r.ts < t.hour + 3600) "
+    "AND (t.hour >= ? OR NOT EXISTS (SELECT 1 FROM daily_rollup d "
+    "WHERE d.day = strftime('%Y-%m-%d', t.hour, 'unixepoch') "
+    "AND d.session_id >= t.root_session AND d.session_id < t.root_session || ';'))"
+)
+
+
+def usage_source(conn, frm: float, to: float, source: str = "all") -> tuple[str, list[Any]]:
+    """SQL (aliased `requests`, so the GROUPS expressions apply) and its args."""
+    source = source if source in SOURCES else "all"
+    parts, args = [], []
+    if source in ("all", "proxy"):
+        parts.append(_PROXY_ROWS)
+        args += [frm, to]
+    if source in ("all", "transcript"):
+        parts.append(_TRANSCRIPT_ROWS)
+        args += [frm, to, _raw_cutoff(conn) or 0]
+    return "(" + " UNION ALL ".join(parts) + ") AS requests", args
+
+
 def where_clause(frm: float, to: float, filters: dict[str, str]) -> tuple[str, list[Any]]:
     parts, args = ["ts >= ?", "ts < ?"], [frm, to]
     for k, sql in FILTERS.items():
@@ -99,15 +141,19 @@ def aggregate(conn, prices: Prices, frm: float, to: float, group: str | list[str
         if g not in GROUPS:
             raise ValueError(f"unknown group {g!r}")
     gexpr = [GROUPS[g] for g in groups]
-    where, args = where_clause(frm, to, filters or {})
+    filters = filters or {}
+    source = filters.get("source") or "all"
+    src_sql, src_args = usage_source(conn, frm, to, source)
+    where, wargs = where_clause(frm, to, filters)
+    args = src_args + wargs
     sel = ", ".join(f"{e} AS g{i}" for i, e in enumerate(gexpr))
     gcols = ", ".join(f"g{i}" for i in range(len(gexpr)))
     sql = (
         f"SELECT {sel + ', ' if sel else ''}COALESCE(provider,'') AS p, COALESCE(model,'') AS m, "
-        "COUNT(*) AS requests, SUM(failed) AS failed, "
+        "SUM(n) AS requests, SUM(failed) AS failed, "
         "SUM(input) AS input, SUM(output) AS output, SUM(cache_read) AS cache_read, "
         "SUM(cache_write_5m) AS cache_write_5m, SUM(cache_write_1h) AS cache_write_1h "
-        f"FROM requests WHERE {where} GROUP BY {gcols + ', ' if gcols else ''}p, m"
+        f"FROM {src_sql} WHERE {where} GROUP BY {gcols + ', ' if gcols else ''}p, m"
     )
     out: dict[tuple, Agg] = {}
     tiered: dict[tuple[str, str], Price] = {}
@@ -130,13 +176,13 @@ def aggregate(conn, prices: Prices, frm: float, to: float, group: str | list[str
     # Context-size tiers: re-price the requests whose prompt is above a tier size.
     for (p, m), price in tiered.items():
         sizes = [t["size"] for t in price.tiers]
-        prompt = "(input + cache_read + cache_write)"
+        prompt = "prompt"
         band = "CASE " + " ".join(f"WHEN {prompt} > {s} THEN {i}" for i, s in reversed(list(enumerate(sizes)))) + " END"
         tsql = (
             f"SELECT {sel + ', ' if sel else ''}{band} AS band, "
             "SUM(input) AS input, SUM(output) AS output, SUM(cache_read) AS cache_read, "
             "SUM(cache_write_5m) AS cache_write_5m, SUM(cache_write_1h) AS cache_write_1h "
-            f"FROM requests WHERE {where} AND COALESCE(provider,'') = ? AND COALESCE(model,'') = ? "
+            f"FROM {src_sql} WHERE {where} AND COALESCE(provider,'') = ? AND COALESCE(model,'') = ? "
             f"AND {prompt} > ? GROUP BY {gcols + ', ' if gcols else ''}band"
         )
         for row in conn.execute(tsql, args + [p, m, sizes[0]]):
@@ -146,8 +192,8 @@ def aggregate(conn, prices: Prices, frm: float, to: float, group: str | list[str
             out[key]["cost"] += cost(tier_price, **toks) - cost(price, **toks)
     # Days older than the raw retention come from the daily rollup.
     raw_cutoff = _raw_cutoff(conn)
-    if raw_cutoff and frm < raw_cutoff and set(groups) <= {"api_key", "auth", "provider", "model", "session", "day"}:
-        _add_rollup(conn, prices, out, groups, frm, min(to, raw_cutoff), filters or {})
+    if raw_cutoff and frm < raw_cutoff and source != "transcript" and set(groups) <= {"api_key", "auth", "provider", "model", "session", "day", "source"}:
+        _add_rollup(conn, prices, out, groups, frm, min(to, raw_cutoff), filters)
     return out
 
 
@@ -159,7 +205,7 @@ def _raw_cutoff(conn) -> float | None:
 def _add_rollup(conn, prices, out, groups, frm, to, filters):
     rs = root_session("daily_rollup.session_id")
     col = {"api_key": "api_key_hash", "auth": "auth_id", "provider": "provider", "model": "model",
-           "session": rs, "day": "day"}
+           "session": rs, "day": "day", "source": "'proxy'"}
     parts, args = ["day >= ?", "day < ?"], [
         datetime.fromtimestamp(frm, timezone.utc).strftime("%Y-%m-%d"),
         datetime.fromtimestamp(to, timezone.utc).strftime("%Y-%m-%d"),
@@ -196,7 +242,9 @@ def labels(conn) -> dict[tuple[str, str], str]:
 def describe(conn, group: str, key: str, lab: dict) -> dict[str, Any]:
     """Display fields for one group key."""
     d: dict[str, Any] = {"key": key}
-    if group == "api_key":
+    if key == TRANSCRIPT_GROUP and group in ("api_key", "auth"):
+        d["label"] = "(transcript)"
+    elif group == "api_key":
         row = conn.execute("SELECT api_key_hint FROM requests WHERE api_key_hash = ? AND api_key_hint IS NOT NULL LIMIT 1", (key,)).fetchone()
         d["hint"] = row[0] if row else None
         d["label"] = lab.get(("api_key", key)) or (row[0] if row else None) or (key[:10] if key else "(none)")
@@ -241,6 +289,8 @@ def summary(conn, prices, frm, to, filters) -> dict[str, Any]:
         "totals": {**{k: v for k, v in tot.items()}, "cost": round(tot["cost"], 6),
                    "tokens": sum(tot[c] for c in TOKEN_COLS)},
         "top": {},
+        "by_source": {k[0]: {**a, "cost": round(a["cost"], 6)}
+                      for k, a in aggregate(conn, prices, frm, to, "source", filters).items()},
     }
     for g in ("api_key", "auth", "provider", "model", "session", "project"):
         res["top"][g] = rows_for(conn, prices, g, frm, to, filters, limit=5)
@@ -308,7 +358,7 @@ def _usage_cost(prices: Prices, usage_by_model: dict, provider: str = "claude") 
 
 
 def sessions_list(conn, prices, frm, to, q: str = "", harness: str = "", has_transcript: str = "", limit: int = 200) -> list[dict]:
-    proxy = aggregate(conn, prices, frm, to, "session", {})
+    proxy = aggregate(conn, prices, frm, to, "session", {"source": "proxy"})
     rows: dict[str, dict] = {}
     for (sid,), a in proxy.items():
         if not sid:
@@ -363,7 +413,7 @@ def session_detail(conn, prices, sid: str) -> dict[str, Any] | None:
         harness, tid = "claude", sid
         sid = f"claude:{sid}"
     far = (0, time.time() + 86400)
-    f = {"session": sid}
+    f = {"session": sid, "source": "proxy"}
     proxy = {
         "totals": None,
         "by_model": rows_for(conn, prices, "model", *far, f),

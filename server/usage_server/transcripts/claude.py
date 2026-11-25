@@ -42,6 +42,19 @@ REPO_FLAG = re.compile(r"(?:-R|--repo)[ =]([\w.-]+/[\w.-]+)")
 MERGE_ERR = re.compile(r"(?i)\b(error|failed|not mergeable|could not|cannot|denied|refused|conflict)\b")
 WORKTREE = [re.compile(r"/\.claude/worktrees/[^/]+/?.*$"), re.compile(r"/\.t3/worktrees/([^/]+)/[^/]+/?.*$")]
 TS_FRACTION = re.compile(r"(\.\d{6})\d+")
+# Prompt-size bands for hourly usage. Context-size price tiers must use one of
+# these sizes for transcript costs to be tiered right (models.dev today: 200k).
+PROMPT_BANDS = (128_000, 200_000, 272_000, 1_000_000)
+
+
+def prompt_band(prompt: int) -> int:
+    """Largest band size the prompt is above, plus one (0 when below all).
+    Stored as a stand-in prompt size, so `prompt > tier_size` still holds."""
+    band = 0
+    for size in PROMPT_BANDS:
+        if prompt > size:
+            band = size + 1
+    return band
 
 
 @dataclass
@@ -151,6 +164,8 @@ class FileStats:
         self.compactions = 0
         self.rebuilds = 0
         self.peak_context = 0
+        # (hour start, model, prompt band) -> [messages, input, output, cache_read, cw5m, cw1h]
+        self.hourly: dict[tuple[int, str, int], list[int]] = {}
         self.prs: dict[tuple[str, str], dict] = {}  # (url, action) -> pr
 
     def add_pr(self, repo: str, number: int, action: str, ts: float | None):
@@ -197,7 +212,14 @@ def read_file(path: Path) -> FileStats:
                 seen.add(mid)
                 st.turns += 1
                 st.models[model] += 1
-                _add_usage(st.usage, model, usage)
+                one = _add_usage({}, model, usage)
+                _merge_usage(st.usage, {model: one})
+                if ts is not None:
+                    prompt = one["input"] + one["cache_read"] + one["cache_write_5m"] + one["cache_write_1h"]
+                    h = st.hourly.setdefault((int(ts // 3600 * 3600), model, prompt_band(prompt)), [0] * 6)
+                    for i, v in enumerate((1, one["input"], one["output"], one["cache_read"],
+                                           one["cache_write_5m"], one["cache_write_1h"])):
+                        h[i] += v
                 skill = e.get("attributionSkill")
                 if skill:
                     su = st.skill_usage[str(skill)[:200]]
@@ -282,6 +304,8 @@ def parse(path: Path) -> dict[str, Any]:
     prs = dict(main.prs)
     tool_errors, compactions, rebuilds = main.tool_errors, main.compactions, main.rebuilds
     first, last = main.first, main.last
+    root = f"{HARNESS}:{path.stem}"
+    hourly = [[root, *k, *v] for k, v in main.hourly.items()]
     for ap in subagent_paths(path):
         fs = read_file(ap)
         meta = read_meta(ap)
@@ -295,6 +319,7 @@ def parse(path: Path) -> dict[str, Any]:
             "usage_by_model": fs.usage,
         })
         _merge_usage(total_usage, fs.usage)
+        hourly += [[f"{root}:agent:{agent_id}", *k, *v] for k, v in fs.hourly.items()]
         tools.update(fs.tools)
         add_skills(fs)
         prs.update({k: v for k, v in fs.prs.items() if k not in prs})
@@ -324,6 +349,9 @@ def parse(path: Path) -> dict[str, Any]:
         "cache_rebuilds": rebuilds,
         "tool_errors": tool_errors,
         "usage_by_model": total_usage,
+        # [usage session ID (proxy style), hour, model, prompt band, messages, input, output,
+        #  cache_read, cache_write_5m, cache_write_1h]
+        "hourly": hourly,
         "tools": dict(tools),
         "agents": agents,
         "skills": [{"skill": s, "loads": d["loads"], "turns": d["turns"], "usage_by_model": d["usage"]} for s, d in sorted(skills.items())],
