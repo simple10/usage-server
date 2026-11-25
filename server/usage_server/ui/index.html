@@ -32,6 +32,10 @@ nav button.active { color: var(--text-primary); border-color: var(--border); bac
 .btn { border-color: var(--border); }
 .btn:hover, nav button:hover { color: var(--text-primary); }
 .filters { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+/* In the proxy panel a floating toolbar covers the top-right corner of the frame:
+   keep the controls next to the tabs and leave that corner empty. */
+body.bridged header { padding-right: 220px; }
+body.bridged .filters { margin-left: 8px; padding-left: 16px; border-left: 1px solid var(--border); }
 select, input[type=text], input[type=password], input[type=date] { font: inherit; color: var(--text-primary); background: var(--surface-0); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
 main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
@@ -107,6 +111,7 @@ a { color: var(--accent); }
 const STORE = "usage-server.token";
 const BRIDGED = location.pathname.startsWith("/v0/resource/plugins/");
 const API_BASE = BRIDGED ? "/v0/management/usage-server/api" : "/api";
+if (BRIDGED) document.body.classList.add("bridged");
 const SERIES = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
 const state = { view: "overview", days: 7, sort: {}, sessionId: null, group: "model", breakdownSort: "cost", q: "" };
 const $ = (s, el = document) => el.querySelector(s);
