@@ -38,7 +38,7 @@ Read [docs/SPEC.md](../docs/SPEC.md) §7 first. Phases 0–4 must have passed on
    `curl -s -H "Authorization: Bearer <api-token>" http://<server-host>:<port>/api/health`
    It should return `"ok": true` and a price count above 0.
 5. Add the two volume lines to the proxy service (see the example compose file).
-6. Add the plugin block to the proxy config. Write the file in place: if the config is bind-mounted as a single file, an editor that saves by rename hides the change from the container.
+6. Add the plugin block to the proxy config. If your config still has the stock block (`plugins: enabled: false, dir: "plugins"`), `python3 deploy/edit_config.py enable <proxy-home>/config.yaml <private-dir>/usage-server.env` does this for you and prints no secrets. Otherwise write it by hand. Write the file in place: if the config is bind-mounted as a single file, an editor that saves by rename hides the change from the container.
 
    ```yaml
    plugins:
@@ -53,7 +53,7 @@ Read [docs/SPEC.md](../docs/SPEC.md) §7 first. Phases 0–4 must have passed on
          menu-label: Usage
    ```
 
-7. Restart the proxy once: `docker compose up -d <proxy-service>` (this applies the new volumes).
+7. Recreate the proxy once: `docker compose up -d --no-deps --force-recreate <proxy-service>`. Do not use `docker compose restart`: it keeps the old container, so the new volumes are not mounted and the plugin is not found.
 8. Check the proxy log for these two lines and no plugin warnings:
    - `pluginhost: plugin loaded plugin_id=usage-server`
    - `pluginhost: plugin registered plugin_id=usage-server`
@@ -72,9 +72,9 @@ Read [docs/SPEC.md](../docs/SPEC.md) §7 first. Phases 0–4 must have passed on
 
 Use the first step that fits. Each was tested on the test proxy.
 
-1. **Turn the plugin off without a restart.** Set `plugins.configs.usage-server.enabled: false` (write in place). The proxy reloads the config and unloads the plugin. Requests continue. The menu entry and bridge routes go away (404).
-2. **Remove the plugin.** Move `usage-server.so` out of `<proxy-home>/plugins` and restart the proxy. The proxy starts normally, even with the `plugins.configs.usage-server` block still present.
-3. **Full revert.** Restore `config.yaml.bak-<date>`, remove the two volume lines, and restart the proxy.
+1. **Turn the plugin off without a restart.** Set `plugins.configs.usage-server.enabled: false` (write in place, or `edit_config.py disable`; `edit_config.py enable` turns it on again). The proxy reloads the config and unloads the plugin. Requests continue. The menu entry and bridge routes go away (404).
+2. **Remove the plugin.** Move `usage-server.so` out of `<proxy-home>/plugins` and recreate the proxy. The proxy starts normally, even with the `plugins.configs.usage-server` block still present.
+3. **Full revert.** Put the plugins block back to stock (`edit_config.py remove`, or restore `config.yaml.bak-<date>`) and recreate the proxy. The two volume lines can stay; they do nothing while the plugin is off. Remove them later if you like.
 
 The server can stay down or be removed at any time. It has no effect on the proxy: the bridge returns 502 (server down) or 504 after `bridge-timeout-ms` (server hung), and the spool keeps filling up to its retention limits.
 
@@ -82,7 +82,7 @@ Records produced while the plugin is off are not recorded. Spool files already w
 
 ## Upgrading the plugin
 
-The proxy keeps the old plugin image loaded when the file is replaced. Copy the new `.so` over the old one, then restart the proxy.
+The proxy keeps the old plugin image loaded when the file is replaced. Copy the new `.so` over the old one, then restart the proxy (`docker compose restart` is enough here, because the mounts do not change).
 
 ## Known limits
 

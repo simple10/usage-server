@@ -1,5 +1,8 @@
 """Turn the usage-server plugin on or off in the proxy config, in place.
-Usage: edit_config.py enable|disable|check <config> <env-file> [--dry-run OUT]
+Usage: edit_config.py enable|disable|remove|check <config> <env-file> [--dry-run OUT]
+  enable   off|disabled -> on      (plugin loads; hot reload, no restart needed once mounted)
+  disable  on -> disabled          (plugin unloads; hot reload, no restart)
+  remove   on|disabled -> off      (back to the stock block)
 Env: USAGE_PORT (default 18090) sets the server-url port. Prints no secrets.
 Only edits the stock form of the `plugins:` block; otherwise it refuses."""
 import os, sys
@@ -15,22 +18,27 @@ ON = ('plugins:\n    enabled: true\n    dir: "plugins"\n    configs:\n        us
       f'            server-url: http://127.0.0.1:{port}\n'
       f'            bridge-token: {env["USAGE_BRIDGE_TOKEN"]}\n'
       '            bridge-timeout-ms: 5000\n            menu-label: Usage\n')
+DISABLED = ON.replace("        usage-server:\n            enabled: true\n",
+                      "        usage-server:\n            enabled: false\n", 1)
+BLOCKS = {"off": OFF, "on": ON, "disabled": DISABLED}
 s = open(cfg).read()
-state = "off" if s.count(OFF) == 1 else "on" if s.count(ON) == 1 else "unknown"
+found = [k for k, b in BLOCKS.items() if s.count(b) == 1]
+state = found[0] if len(found) == 1 else "unknown"
 if mode == "check":
     print("plugin block state:", state); sys.exit(0 if state != "unknown" else 1)
-if mode == "enable":
-    if state == "on": print("already enabled"); sys.exit(0)
-    if state != "off": print("ERROR: plugins block not in the expected form; not editing"); sys.exit(1)
-    s2 = s.replace(OFF, ON, 1)
-elif mode == "disable":
-    if state != "on": print("ERROR: usage-server block not in the expected form; not editing"); sys.exit(1)
-    s2 = s.replace(ON, ON.replace("        usage-server:\n            enabled: true\n", "        usage-server:\n            enabled: false\n"), 1)
-else:
-    print("mode must be enable, disable or check"); sys.exit(2)
+target, allowed = {"enable": ("on", {"off", "disabled"}),
+                   "disable": ("disabled", {"on"}),
+                   "remove": ("off", {"on", "disabled"})}.get(mode, (None, None))
+if target is None:
+    print("mode must be enable, disable, remove or check"); sys.exit(2)
+if state == target:
+    print(f"already {state}"); sys.exit(0)
+if state not in allowed:
+    print(f"ERROR: plugins block state is {state}; cannot {mode}; not editing"); sys.exit(1)
+s2 = s.replace(BLOCKS[state], BLOCKS[target], 1)
 # Write in place (the file is bind-mounted; a rename would not be seen).
 flags = os.O_WRONLY | os.O_CREAT | (0 if out == cfg else os.O_TRUNC)
 fd = os.open(out, flags, 0o600)
 with os.fdopen(fd, "r+" if out == cfg else "w") as f:
     f.seek(0); f.write(s2); f.truncate()
-print(f"{mode}d usage-server plugin in {'place' if out == cfg else out}")
+print(f"{mode}: {state} -> {target} in {'place' if out == cfg else out}")
