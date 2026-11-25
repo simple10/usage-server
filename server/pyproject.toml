@@ -1,6 +1,6 @@
 [project]
 name = "usage-server"
-version = "0.1.1"
+version = "0.1.2"
 description = "Usage tracking and estimated cost for CLIProxyAPI"
 requires-python = ">=3.15"
 dependencies = [
